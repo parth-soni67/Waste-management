@@ -131,10 +131,11 @@ export default function OfficerPage() {
   const [addModalTab, setAddModalTab] = useState<"vehicle" | "driver">("vehicle");
   const [successToast, setSuccessToast] = useState<string | null>(null);
 
-  // Report Detail Drawer State
   const [reportDrawerOpen, setReportDrawerOpen] = useState(false);
   const [selectedReportDetail, setSelectedReportDetail] = useState<CitizenReportDetail | null>(null);
   const [officerActionNote, setOfficerActionNote] = useState("");
+  const [manualSeverity, setManualSeverity] = useState<string>("DEFAULT");
+  const [manualTruck, setManualTruck] = useState<string>("AUTO");
 
   // Citizen Reports Database (linked to incidents by incidentId)
   const [citizenReports, setCitizenReports] = useState<CitizenReportDetail[]>([
@@ -430,6 +431,7 @@ export default function OfficerPage() {
           setIncidents(prev => {
             const existingIds = new Set(prev.map(p => p.id));
             const newIncidents = syncedIncidents.filter((i: any) => !existingIds.has(i.id));
+            if (newIncidents.length === 0) return prev;
             return [...newIncidents, ...prev];
           });
         }
@@ -438,6 +440,7 @@ export default function OfficerPage() {
           setCitizenReports(prev => {
             const existingIds = new Set(prev.map(p => p.reportId));
             const newDetails = syncedDetails.filter((r: any) => !existingIds.has(r.reportId));
+            if (newDetails.length === 0) return prev;
             return [...newDetails, ...prev];
           });
         }
@@ -506,6 +509,8 @@ export default function OfficerPage() {
       setSelectedReportDetail(reports[0]);
       setReportDrawerOpen(true);
       setOfficerActionNote("");
+      setManualSeverity("DEFAULT");
+      setManualTruck("AUTO");
     }
   };
 
@@ -524,24 +529,23 @@ export default function OfficerPage() {
       )
     );
 
-    // If escalating, change incident priority
-    if (action === "ESCALATED") {
-      const report = citizenReports.find((r) => r.reportId === reportId);
-      if (report) {
-        setIncidents((prev) =>
-          prev.map((inc) =>
-            inc.id === report.incidentId ? { ...inc, priority: "P0" } : inc
-          )
-        );
-      }
-    }
-
-    // If approving, dispatch truck
-    if (action === "APPROVED") {
-      const report = citizenReports.find((r) => r.reportId === reportId);
-      if (report) {
-        handleDispatch(report.incidentId);
-      }
+    const report = citizenReports.find((r) => r.reportId === reportId);
+    if (report && (action === "APPROVED" || action === "ESCALATED")) {
+      const priorityToSet = manualSeverity !== "DEFAULT" ? manualSeverity : action === "ESCALATED" ? "P0" : undefined;
+      const truckToSet = manualTruck !== "AUTO" ? manualTruck : "GJ-01-WM-4402 (Ramesh Patel)";
+      
+      setIncidents((prev) =>
+        prev.map((inc) => {
+          if (inc.id === report.incidentId) {
+            return {
+              ...inc,
+              ...(priorityToSet ? { priority: priorityToSet as any } : {}),
+              ...(action === "APPROVED" ? { status: "ASSIGNED", assignedTruck: truckToSet } : {})
+            };
+          }
+          return inc;
+        })
+      );
     }
 
     const actionLabels = { APPROVED: "Approved & Dispatched", ESCALATED: "Escalated to P0", REJECTED: "Rejected", DUPLICATE: "Marked Duplicate" };
@@ -1767,6 +1771,43 @@ export default function OfficerPage() {
                       placeholder="Add officer notes before taking action..."
                       className="w-full px-3 py-2 rounded-xl text-xs border border-slate-200 focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/30 resize-none"
                     />
+                  </div>
+
+                  {/* Manual Overrides */}
+                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-3">
+                    <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Manual Overrides</h4>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[10px] font-semibold text-slate-600 mb-1 block">Override Severity</label>
+                        <select 
+                          value={manualSeverity}
+                          onChange={(e) => setManualSeverity(e.target.value)}
+                          className="w-full text-xs p-1.5 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-[var(--color-primary)] bg-white"
+                        >
+                          <option value="DEFAULT">Keep Current / AI Suggested</option>
+                          <option value="P0">P0 (Critical Emergency)</option>
+                          <option value="P1">P1 (High Priority)</option>
+                          <option value="P2">P2 (Medium Priority)</option>
+                          <option value="P3">P3 (Standard)</option>
+                          <option value="P4">P4 (Low)</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-semibold text-slate-600 mb-1 block">Manual Truck Dispatch</label>
+                        <select 
+                          value={manualTruck}
+                          onChange={(e) => setManualTruck(e.target.value)}
+                          className="w-full text-xs p-1.5 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-[var(--color-primary)] bg-white"
+                        >
+                          <option value="AUTO">Auto-Assign Best Truck</option>
+                          {vehicles.map(v => (
+                            <option key={v.id} value={`${v.plate} (${v.driver})`}>
+                              {v.plate} ({v.driver})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
                   </div>
 
                   {/* Action Buttons Grid */}
