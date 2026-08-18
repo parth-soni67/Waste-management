@@ -1,0 +1,16 @@
+/* WasteWise AI — Additional style tokens
+ *
+ * This file exists for any design tokens or utility classes that need
+ * to live outside globals.css (e.g. component-specific token layers).
+ * For now it re-exports the token structure for documentation.
+ *
+ * Import via: @import "../styles/tokens.css" in component CSS modules
+ * if needed, or reference CSS custom properties directly.
+ */
+
+/* Severity badge utilities — consistent P0–P4 coloring across the app */
+.badge-p0 { background-color: var(--color-p0-emergency); color: white; }
+.badge-p1 { background-color: var(--color-p1-veryhigh); color: white; }
+.badge-p2 { background-color: var(--color-p2-high); color: white; }
+.badge-p3 { background-color: var(--color-p3-normal); color: white; }
+.badge-p4 { background-color: var(--color-p4-low); color: white; }

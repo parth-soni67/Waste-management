@@ -1,0 +1,86 @@
+# WasteWise AI — Docker Compose (Local Development)
+# Usage: docker compose up --build
+
+services:
+  # ── PostgreSQL + PostGIS ─────────────────────────────────────────
+  postgres:
+    image: postgis/postgis:16-3.4
+    container_name: wastewise-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-wastewise}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-wastewise}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-wastewise} -d ${POSTGRES_DB:-wastewise}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis ────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: wastewise-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ── FastAPI Backend ──────────────────────────────────────────────
+  backend:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    container_name: wastewise-backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://wastewise:changeme_dev@postgres:5432/wastewise}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      SECRET_KEY: ${SECRET_KEY:-dev_secret_key_not_for_production}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-15}
+      REFRESH_TOKEN_EXPIRE_DAYS: ${REFRESH_TOKEN_EXPIRE_DAYS:-7}
+      BACKEND_CORS_ORIGINS: ${BACKEND_CORS_ORIGINS:-["http://localhost:3000"]}
+      ENVIRONMENT: ${ENVIRONMENT:-local}
+      ROUTING_ENGINE_URL: ${ROUTING_ENGINE_URL:-https://router.project-osrm.org}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./apps/api:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ── Next.js Frontend ─────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./apps/web
+      dockerfile: ../../infra/docker/Dockerfile.frontend
+    container_name: wastewise-frontend
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      NEXT_PUBLIC_MAPLIBRE_STYLE_URL: ${NEXT_PUBLIC_MAPLIBRE_STYLE_URL:-}
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./apps/web:/app
+      - /app/node_modules
+      - /app/.next
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  redis_data:

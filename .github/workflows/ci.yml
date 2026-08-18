@@ -1,0 +1,98 @@
+# WasteWise AI — CI Pipeline
+# Runs lint + test on every push and PR.
+
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  # ── Backend Lint ──────────────────────────────────────────────────
+  backend-lint:
+    name: Backend Lint (ruff + black)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install linters
+        run: pip install ruff black
+
+      - name: Run ruff
+        run: ruff check apps/api/
+
+      - name: Run black (check mode)
+        run: black --check apps/api/
+
+  # ── Backend Tests ─────────────────────────────────────────────────
+  backend-test:
+    name: Backend Tests (pytest)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_USER: wastewise
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: wastewise_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U wastewise"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r apps/api/requirements.txt
+
+      - name: Run tests
+        working-directory: apps/api
+        env:
+          DATABASE_URL: postgresql+asyncpg://wastewise:testpass@localhost:5432/wastewise_test
+          REDIS_URL: redis://localhost:6379/0
+          SECRET_KEY: test_secret_key_for_ci_only
+          ENVIRONMENT: test
+        run: pytest tests/ -v
+
+  # ── Frontend Lint ─────────────────────────────────────────────────
+  frontend-lint:
+    name: Frontend Lint (ESLint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: apps/web
+        run: npm ci
+
+      - name: Run ESLint
+        working-directory: apps/web
+        run: npm run lint
