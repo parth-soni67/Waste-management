@@ -31,6 +31,16 @@ import {
   Check,
   Phone,
   Fuel,
+  Image as ImageIcon,
+  FileText,
+  Eye,
+  ArrowUpRight,
+  ThumbsDown,
+  Copy,
+  ChevronDown,
+  User,
+  Calendar,
+  Tag,
 } from "lucide-react";
 import Link from "next/link";
 import type { MapPoint } from "@/components/map/MapLibreView";
@@ -83,6 +93,26 @@ interface FleetDriver {
   status: "ACTIVE" | "ON_BREAK" | "OFF_DUTY";
 }
 
+interface CitizenReportDetail {
+  reportId: string;
+  incidentId: string;
+  reporterName: string;
+  reporterPhone: string;
+  description: string;
+  address: string;
+  category: string;
+  photos: string[];
+  submittedAt: string;
+  aiCategory: string;
+  aiConfidence: number;
+  aiSeverity: number;
+  aiVolume: number;
+  aiTags: string[];
+  aiRecommendedAction: string;
+  officerAction?: "APPROVED" | "ESCALATED" | "REJECTED" | "DUPLICATE";
+  officerNotes?: string;
+}
+
 export default function OfficerPage() {
   const [filterPriority, setFilterPriority] = useState<string>("ALL");
   const [showHotspots, setShowHotspots] = useState<boolean>(true);
@@ -98,6 +128,100 @@ export default function OfficerPage() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [addModalTab, setAddModalTab] = useState<"vehicle" | "driver">("vehicle");
   const [successToast, setSuccessToast] = useState<string | null>(null);
+
+  // Report Detail Drawer State
+  const [reportDrawerOpen, setReportDrawerOpen] = useState(false);
+  const [selectedReportDetail, setSelectedReportDetail] = useState<CitizenReportDetail | null>(null);
+  const [officerActionNote, setOfficerActionNote] = useState("");
+
+  // Citizen Reports Database (linked to incidents by incidentId)
+  const [citizenReports, setCitizenReports] = useState<CitizenReportDetail[]>([
+    {
+      reportId: "REP-9482",
+      incidentId: "INC-8091",
+      reporterName: "Anita Sharma",
+      reporterPhone: "+91 98765 43210",
+      description: "Overflowing green bins near hospital main gate. Mixed waste including used masks, syringes visible, and plastic food packaging. Very foul smell. Patients and visitors are affected. This has been here for 2 days. Please clean urgently — this is a health hazard near the pediatric ward.",
+      address: "Sector 12 Civil Hospital Main Gate, Gandhinagar",
+      category: "Hazardous / Bio-Medical",
+      photos: ["/demo-report-1.jpg"],
+      submittedAt: "18 Aug 2026, 09:36 AM",
+      aiCategory: "Hazardous Bio-Medical Waste",
+      aiConfidence: 0.96,
+      aiSeverity: 9.2,
+      aiVolume: 3.4,
+      aiTags: ["bio_hazard", "medical_waste", "overflow_bin", "syringes", "masks"],
+      aiRecommendedAction: "IMMEDIATE: Dispatch Hazmat-certified Compactor. Notify hospital administration.",
+    },
+    {
+      reportId: "REP-9380",
+      incidentId: "INC-8091",
+      reporterName: "Rakesh Patel",
+      reporterPhone: "+91 99876 12340",
+      description: "More waste piling up near the hospital side entrance. Same issue as other reports. Medical waste packaging visible.",
+      address: "Sector 12 Civil Hospital Side Gate, Gandhinagar",
+      category: "Hazardous / Bio-Medical",
+      photos: ["/demo-report-1.jpg"],
+      submittedAt: "18 Aug 2026, 09:48 AM",
+      aiCategory: "Hazardous Bio-Medical Waste",
+      aiConfidence: 0.92,
+      aiSeverity: 8.8,
+      aiVolume: 2.1,
+      aiTags: ["bio_hazard", "medical_packaging", "overflow_bin"],
+      aiRecommendedAction: "Cluster with existing INC-8091. Escalate priority.",
+    },
+    {
+      reportId: "REP-9104",
+      incidentId: "INC-8042",
+      reporterName: "Meera Joshi",
+      reporterPhone: "+91 98712 56789",
+      description: "Huge pile of plastic bottles and packaging waste dumped next to the railway depot boundary wall. Looks like someone unloaded a truck of packaging waste here. Blocking the pedestrian path.",
+      address: "Gandhinagar Railway Depot, Platform Side",
+      category: "Plastic / Bottling",
+      photos: ["/demo-report-2.jpg"],
+      submittedAt: "18 Aug 2026, 08:50 AM",
+      aiCategory: "Plastic Packaging Waste",
+      aiConfidence: 0.94,
+      aiSeverity: 7.6,
+      aiVolume: 2.8,
+      aiTags: ["plastic_bottles", "packaging", "illegal_dumping", "pedestrian_hazard"],
+      aiRecommendedAction: "Dispatch 5-Tonne Compactor. Flag for illegal dumping investigation.",
+    },
+    {
+      reportId: "REP-8920",
+      incidentId: "INC-7994",
+      reporterName: "Suresh Desai",
+      reporterPhone: "+91 97654 32100",
+      description: "Rotting vegetable waste from the wholesale market spilling onto the road. Strong smell attracting stray animals. Market vendors also dumping water from fish stalls.",
+      address: "APMC Wholesale Yard, Gate 3, Sector 21",
+      category: "Organic / Food",
+      photos: ["/demo-report-2.jpg"],
+      submittedAt: "18 Aug 2026, 08:00 AM",
+      aiCategory: "Organic Food Waste",
+      aiConfidence: 0.91,
+      aiSeverity: 6.8,
+      aiVolume: 4.2,
+      aiTags: ["organic_waste", "food_waste", "market_spill", "stray_animals"],
+      aiRecommendedAction: "Dispatch Tipper truck. Schedule daily pre-market cleanup.",
+    },
+    {
+      reportId: "REP-8850",
+      incidentId: "INC-7920",
+      reporterName: "Kiran Thakor",
+      reporterPhone: "+91 98890 11223",
+      description: "Construction rubble and broken concrete blocks dumped on service road shoulder. Partly blocking traffic flow for two-wheelers.",
+      address: "Service Road near Zone 2 Central Depot",
+      category: "Construction Debris",
+      photos: ["/demo-report-1.jpg"],
+      submittedAt: "18 Aug 2026, 06:15 AM",
+      aiCategory: "Construction & Demolition Waste",
+      aiConfidence: 0.88,
+      aiSeverity: 5.4,
+      aiVolume: 6.0,
+      aiTags: ["construction_debris", "concrete", "road_hazard", "illegal_dumping"],
+      aiRecommendedAction: "Dispatch Heavy Tipper. Fine construction contractor if identifiable.",
+    },
+  ]);
 
   // New Vehicle Form State
   const [newVehiclePlate, setNewVehiclePlate] = useState("");
@@ -311,6 +435,56 @@ export default function OfficerPage() {
           : inc
       )
     );
+  };
+
+  // Open report detail drawer for an incident
+  const handleViewReports = (incidentId: string) => {
+    const reports = citizenReports.filter((r) => r.incidentId === incidentId);
+    if (reports.length > 0) {
+      setSelectedReportDetail(reports[0]);
+      setReportDrawerOpen(true);
+      setOfficerActionNote("");
+    }
+  };
+
+  // Get all citizen reports for a given incident
+  const getReportsForIncident = (incidentId: string) => {
+    return citizenReports.filter((r) => r.incidentId === incidentId);
+  };
+
+  // Officer action handlers on citizen reports
+  const handleOfficerAction = (reportId: string, action: CitizenReportDetail["officerAction"]) => {
+    setCitizenReports((prev) =>
+      prev.map((r) =>
+        r.reportId === reportId
+          ? { ...r, officerAction: action, officerNotes: officerActionNote || undefined }
+          : r
+      )
+    );
+
+    // If escalating, change incident priority
+    if (action === "ESCALATED") {
+      const report = citizenReports.find((r) => r.reportId === reportId);
+      if (report) {
+        setIncidents((prev) =>
+          prev.map((inc) =>
+            inc.id === report.incidentId ? { ...inc, priority: "P0" } : inc
+          )
+        );
+      }
+    }
+
+    // If approving, dispatch truck
+    if (action === "APPROVED") {
+      const report = citizenReports.find((r) => r.reportId === reportId);
+      if (report) {
+        handleDispatch(report.incidentId);
+      }
+    }
+
+    const actionLabels = { APPROVED: "Approved & Dispatched", ESCALATED: "Escalated to P0", REJECTED: "Rejected", DUPLICATE: "Marked Duplicate" };
+    setSuccessToast(`✅ Report ${reportId}: ${actionLabels[action!] || action}`);
+    setTimeout(() => setSuccessToast(null), 4000);
   };
 
   const handleRecomputePriorities = () => {
@@ -747,9 +921,24 @@ export default function OfficerPage() {
                 </div>
 
                 <div className="flex items-center justify-between pt-2 border-t border-slate-100/80">
-                  <div className="flex items-center gap-1 text-[11px] font-semibold text-slate-600">
-                    <Clock className="w-3.5 h-3.5 text-slate-400" />
-                    <span>SLA: {inc.slaMinutesLeft}m left</span>
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1 text-[11px] font-semibold text-slate-600">
+                      <Clock className="w-3.5 h-3.5 text-slate-400" />
+                      <span>SLA: {inc.slaMinutesLeft}m left</span>
+                    </div>
+                    {/* View Reports Button */}
+                    {getReportsForIncident(inc.id).length > 0 && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleViewReports(inc.id);
+                        }}
+                        className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 cursor-pointer transition-colors"
+                      >
+                        <Eye className="w-3 h-3" />
+                        {getReportsForIncident(inc.id).length} Reports
+                      </button>
+                    )}
                   </div>
 
                   {inc.status === "REPORTED" ? (
@@ -1276,6 +1465,260 @@ export default function OfficerPage() {
                 </div>
               </form>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* =============== CITIZEN REPORT DETAIL DRAWER =============== */}
+      {reportDrawerOpen && selectedReportDetail && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/50 backdrop-blur-xs animate-in fade-in duration-200">
+          {/* Backdrop click to close */}
+          <div className="flex-1" onClick={() => setReportDrawerOpen(false)} />
+
+          {/* Drawer Panel */}
+          <div className="w-full max-w-xl bg-white h-full overflow-y-auto shadow-2xl animate-in slide-in-from-right duration-300">
+            {/* Drawer Header */}
+            <div className="sticky top-0 z-10 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-xl bg-indigo-50">
+                  <FileText className="w-5 h-5 text-indigo-700" />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-slate-900">Citizen Report Detail</h2>
+                  <p className="text-[11px] text-slate-500 font-medium">
+                    {selectedReportDetail.reportId} → Linked to Incident {selectedReportDetail.incidentId}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setReportDrawerOpen(false)}
+                className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="px-6 py-5 space-y-6">
+              {/* Report Navigation — switch between citizen reports for same incident */}
+              {(() => {
+                const allReports = getReportsForIncident(selectedReportDetail.incidentId);
+                if (allReports.length > 1) {
+                  return (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">
+                        {allReports.length} Clustered Reports:
+                      </span>
+                      {allReports.map((r) => (
+                        <button
+                          key={r.reportId}
+                          onClick={() => {
+                            setSelectedReportDetail(r);
+                            setOfficerActionNote("");
+                          }}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                            selectedReportDetail.reportId === r.reportId
+                              ? "bg-indigo-600 text-white shadow-sm"
+                              : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                          }`}
+                        >
+                          {r.reportId}
+                        </button>
+                      ))}
+                    </div>
+                  );
+                }
+                return null;
+              })()}
+
+              {/* Officer Action Status (if already acted) */}
+              {selectedReportDetail.officerAction && (
+                <div className={`p-3 rounded-xl border text-xs font-bold flex items-center gap-2 ${
+                  selectedReportDetail.officerAction === "APPROVED" ? "bg-emerald-50 border-emerald-200 text-emerald-800" :
+                  selectedReportDetail.officerAction === "ESCALATED" ? "bg-red-50 border-red-200 text-red-800" :
+                  selectedReportDetail.officerAction === "REJECTED" ? "bg-slate-100 border-slate-300 text-slate-600" :
+                  "bg-amber-50 border-amber-200 text-amber-800"
+                }`}>
+                  <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+                  <span>
+                    Officer Decision: {selectedReportDetail.officerAction}
+                    {selectedReportDetail.officerNotes && ` — "${selectedReportDetail.officerNotes}"`}
+                  </span>
+                </div>
+              )}
+
+              {/* Photo Evidence Section */}
+              <div>
+                <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wide mb-3 flex items-center gap-1.5">
+                  <ImageIcon className="w-3.5 h-3.5 text-slate-500" />
+                  Photo Evidence ({selectedReportDetail.photos.length})
+                </h3>
+                <div className="grid grid-cols-1 gap-3">
+                  {selectedReportDetail.photos.map((photo, i) => (
+                    <div key={i} className="relative rounded-xl overflow-hidden border border-slate-200 shadow-sm">
+                      <img
+                        src={photo}
+                        alt={`Report photo ${i + 1}`}
+                        className="w-full h-56 object-cover"
+                      />
+                      <div className="absolute bottom-2 left-2 px-2 py-0.5 rounded bg-black/60 text-white text-[10px] font-bold">
+                        Photo {i + 1} of {selectedReportDetail.photos.length}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Reporter Information */}
+              <div className="bg-slate-50 rounded-xl p-4 border border-slate-200 space-y-3">
+                <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wide flex items-center gap-1.5">
+                  <User className="w-3.5 h-3.5 text-slate-500" />
+                  Reporter Details
+                </h3>
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <span className="text-slate-500 font-medium">Name</span>
+                    <p className="font-bold text-slate-900">{selectedReportDetail.reporterName}</p>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 font-medium">Phone</span>
+                    <p className="font-bold text-slate-900">{selectedReportDetail.reporterPhone}</p>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 font-medium">Submitted</span>
+                    <p className="font-bold text-slate-900 flex items-center gap-1">
+                      <Calendar className="w-3 h-3 text-slate-400" />
+                      {selectedReportDetail.submittedAt}
+                    </p>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 font-medium">Category</span>
+                    <p className="font-bold text-slate-900 flex items-center gap-1">
+                      <Tag className="w-3 h-3 text-slate-400" />
+                      {selectedReportDetail.category}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Citizen Description */}
+              <div>
+                <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                  <MessageSquare className="w-3.5 h-3.5 text-slate-500" />
+                  Citizen Description
+                </h3>
+                <div className="bg-amber-50/60 border border-amber-200/60 rounded-xl p-4 text-xs text-slate-800 leading-relaxed italic">
+                  &ldquo;{selectedReportDetail.description}&rdquo;
+                </div>
+              </div>
+
+              {/* Location */}
+              <div>
+                <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                  <MapPin className="w-3.5 h-3.5 text-slate-500" />
+                  Location
+                </h3>
+                <p className="text-xs font-semibold text-slate-800">{selectedReportDetail.address}</p>
+              </div>
+
+              {/* AI Computer Vision Analysis */}
+              <div className="bg-gradient-to-br from-emerald-50 to-teal-50 rounded-xl p-4 border border-emerald-200 space-y-3">
+                <h3 className="text-xs font-bold text-emerald-900 uppercase tracking-wide flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                  AI Computer Vision Analysis
+                </h3>
+
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <span className="text-emerald-700 font-medium">Detected Category</span>
+                    <p className="font-bold text-emerald-900">{selectedReportDetail.aiCategory}</p>
+                  </div>
+                  <div>
+                    <span className="text-emerald-700 font-medium">Confidence</span>
+                    <p className="font-bold text-emerald-900">{(selectedReportDetail.aiConfidence * 100).toFixed(0)}%</p>
+                  </div>
+                  <div>
+                    <span className="text-emerald-700 font-medium">Severity Score</span>
+                    <p className="font-bold text-emerald-900">{selectedReportDetail.aiSeverity}/10</p>
+                  </div>
+                  <div>
+                    <span className="text-emerald-700 font-medium">Est. Volume</span>
+                    <p className="font-bold text-emerald-900">{selectedReportDetail.aiVolume} m³</p>
+                  </div>
+                </div>
+
+                <div>
+                  <span className="text-[10px] text-emerald-700 font-medium block mb-1">Detected Tags</span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {selectedReportDetail.aiTags.map((tag) => (
+                      <span key={tag} className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="pt-2 border-t border-emerald-200">
+                  <span className="text-[10px] text-emerald-700 font-medium block mb-1">AI Recommended Action</span>
+                  <p className="text-xs font-bold text-emerald-900">{selectedReportDetail.aiRecommendedAction}</p>
+                </div>
+              </div>
+
+              {/* Officer Action Section */}
+              {!selectedReportDetail.officerAction && (
+                <div className="bg-white rounded-xl p-4 border-2 border-dashed border-slate-300 space-y-4">
+                  <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
+                    <ShieldCheck className="w-3.5 h-3.5 text-[var(--color-primary)]" />
+                    Officer Decision Required
+                  </h3>
+
+                  {/* Officer Notes */}
+                  <div>
+                    <label className="text-[11px] font-semibold text-slate-600 mb-1 block">
+                      Notes (optional)
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={officerActionNote}
+                      onChange={(e) => setOfficerActionNote(e.target.value)}
+                      placeholder="Add officer notes before taking action..."
+                      className="w-full px-3 py-2 rounded-xl text-xs border border-slate-200 focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/30 resize-none"
+                    />
+                  </div>
+
+                  {/* Action Buttons Grid */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => handleOfficerAction(selectedReportDetail.reportId, "APPROVED")}
+                      className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-xs font-bold bg-emerald-700 text-white hover:bg-emerald-800 shadow-sm cursor-pointer transition-all"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      Approve & Dispatch
+                    </button>
+                    <button
+                      onClick={() => handleOfficerAction(selectedReportDetail.reportId, "ESCALATED")}
+                      className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-xs font-bold bg-red-600 text-white hover:bg-red-700 shadow-sm cursor-pointer transition-all"
+                    >
+                      <ArrowUpRight className="w-3.5 h-3.5" />
+                      Escalate to P0
+                    </button>
+                    <button
+                      onClick={() => handleOfficerAction(selectedReportDetail.reportId, "REJECTED")}
+                      className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-xs font-bold bg-slate-200 text-slate-700 hover:bg-slate-300 cursor-pointer transition-all"
+                    >
+                      <ThumbsDown className="w-3.5 h-3.5" />
+                      Reject / Close
+                    </button>
+                    <button
+                      onClick={() => handleOfficerAction(selectedReportDetail.reportId, "DUPLICATE")}
+                      className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-xs font-bold bg-amber-100 text-amber-800 hover:bg-amber-200 border border-amber-300 cursor-pointer transition-all"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                      Mark Duplicate
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

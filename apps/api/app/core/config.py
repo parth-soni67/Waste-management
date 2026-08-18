@@ -46,7 +46,7 @@ class Settings(BaseSettings):
             except json.JSONDecodeError:
                 pass
             return [origin.strip() for origin in v.split(",") if origin.strip()]
-        return v
+        return v   
 
     # --- Routing Engine ---
     ROUTING_ENGINE_URL: str = "https://router.project-osrm.org"
