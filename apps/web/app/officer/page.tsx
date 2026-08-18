@@ -25,6 +25,12 @@ import {
   BarChart3,
   Bell,
   Bot,
+  Plus,
+  UserPlus,
+  X,
+  Check,
+  Phone,
+  Fuel,
 } from "lucide-react";
 import Link from "next/link";
 import type { MapPoint } from "@/components/map/MapLibreView";
@@ -54,6 +60,29 @@ interface IncidentItem {
   sensitiveLocation?: string;
 }
 
+interface FleetVehicle {
+  id: string;
+  plate: string;
+  type: string;
+  capacityKg: number;
+  currentLoadKg: number;
+  status: "AVAILABLE" | "ASSIGNED" | "EN_ROUTE" | "COLLECTING";
+  driver: string;
+  lat: number;
+  lng: number;
+  zone: string;
+}
+
+interface FleetDriver {
+  id: string;
+  name: string;
+  phone: string;
+  license: string;
+  zone: string;
+  assignedTruck: string;
+  status: "ACTIVE" | "ON_BREAK" | "OFF_DUTY";
+}
+
 export default function OfficerPage() {
   const [filterPriority, setFilterPriority] = useState<string>("ALL");
   const [showHotspots, setShowHotspots] = useState<boolean>(true);
@@ -63,7 +92,97 @@ export default function OfficerPage() {
   const [agentQuery, setAgentQuery] = useState("");
   const [agentResponse, setAgentResponse] = useState<string | null>(null);
   const [agentLoading, setAgentLoading] = useState(false);
-  const [agentHistory, setAgentHistory] = useState<Array<{q: string; a: string}>>([]);
+  const [agentHistory, setAgentHistory] = useState<Array<{ q: string; a: string }>>([]);
+
+  // Modal State for Adding Vehicle / Driver
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [addModalTab, setAddModalTab] = useState<"vehicle" | "driver">("vehicle");
+  const [successToast, setSuccessToast] = useState<string | null>(null);
+
+  // New Vehicle Form State
+  const [newVehiclePlate, setNewVehiclePlate] = useState("");
+  const [newVehicleType, setNewVehicleType] = useState("Compactor 5T");
+  const [newVehicleCapacity, setNewVehicleCapacity] = useState(5000);
+  const [newVehicleDriver, setNewVehicleDriver] = useState("");
+  const [newVehicleZone, setNewVehicleZone] = useState("Sector 12 Hospital Zone");
+
+  // New Driver Form State
+  const [newDriverName, setNewDriverName] = useState("");
+  const [newDriverPhone, setNewDriverPhone] = useState("");
+  const [newDriverLicense, setNewDriverLicense] = useState("");
+  const [newDriverZone, setNewDriverZone] = useState("Sector 21 APMC");
+  const [newDriverTruck, setNewDriverTruck] = useState("");
+
+  // Registered Vehicles State
+  const [vehicles, setVehicles] = useState<FleetVehicle[]>([
+    {
+      id: "VEH-01",
+      plate: "GJ-01-WM-4402",
+      type: "Compactor 5T",
+      capacityKg: 5000,
+      currentLoadKg: 2450,
+      status: "EN_ROUTE",
+      driver: "Vikram Patel",
+      lat: 23.025,
+      lng: 72.578,
+      zone: "Sector 12 Hospital Zone",
+    },
+    {
+      id: "VEH-02",
+      plate: "GJ-01-WM-9120",
+      type: "Tipper 3T",
+      capacityKg: 3000,
+      currentLoadKg: 1100,
+      status: "COLLECTING",
+      driver: "Rajesh Parmar",
+      lat: 23.042,
+      lng: 72.551,
+      zone: "Sector 21 APMC Yard",
+    },
+    {
+      id: "VEH-03",
+      plate: "GJ-01-WM-8820",
+      type: "Mini Truck 1.5T",
+      capacityKg: 1500,
+      currentLoadKg: 0,
+      status: "AVAILABLE",
+      driver: "Sunil Solanki",
+      lat: 23.018,
+      lng: 72.562,
+      zone: "Zone 2 Central Depot",
+    },
+  ]);
+
+  // Registered Drivers State
+  const [drivers, setDrivers] = useState<FleetDriver[]>([
+    {
+      id: "DRV-01",
+      name: "Vikram Patel",
+      phone: "+91 98765 44021",
+      license: "GJ-01-2022-DRV-44",
+      zone: "Sector 12 Hospital Zone",
+      assignedTruck: "GJ-01-WM-4402",
+      status: "ACTIVE",
+    },
+    {
+      id: "DRV-02",
+      name: "Rajesh Parmar",
+      phone: "+91 98765 91202",
+      license: "GJ-01-2023-DRV-91",
+      zone: "Sector 21 APMC Yard",
+      assignedTruck: "GJ-01-WM-9120",
+      status: "ACTIVE",
+    },
+    {
+      id: "DRV-03",
+      name: "Sunil Solanki",
+      phone: "+91 98765 88203",
+      license: "GJ-01-2024-DRV-88",
+      zone: "Zone 2 Central Depot",
+      assignedTruck: "GJ-01-WM-8820",
+      status: "ACTIVE",
+    },
+  ]);
 
   // Initial Route Polyline Coordinates (Truck -> Stop 1 -> Stop 2 -> Disposal Facility)
   const [routeCoordinates, setRouteCoordinates] = useState<Array<[number, number]>>([
@@ -139,23 +258,16 @@ export default function OfficerPage() {
       type: "incident" as const,
     }));
 
-    // Add active collection trucks
-    points.push(
-      {
-        id: "TRK-01",
-        lat: 23.025,
-        lng: 72.578,
-        title: "GJ-01-WM-4402 (En Route)",
+    // Add all fleet vehicles dynamically
+    vehicles.forEach((veh) => {
+      points.push({
+        id: veh.id,
+        lat: veh.lat,
+        lng: veh.lng,
+        title: `${veh.plate} (${veh.type} · Driver: ${veh.driver || "Unassigned"})`,
         type: "vehicle" as const,
-      },
-      {
-        id: "TRK-02",
-        lat: 23.042,
-        lng: 72.551,
-        title: "GJ-01-WM-9120 (Collecting)",
-        type: "vehicle" as const,
-      }
-    );
+      });
+    });
 
     // Add Predicted Hotspots if layer toggled on
     if (showHotspots) {
@@ -180,7 +292,7 @@ export default function OfficerPage() {
     }
 
     return points;
-  }, [incidents, showHotspots]);
+  }, [incidents, vehicles, showHotspots]);
 
   const filteredIncidents =
     filterPriority === "ALL"
@@ -249,6 +361,124 @@ export default function OfficerPage() {
     }, 700);
   };
 
+  // Add Vehicle Form Handler
+  const handleAddVehicle = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newVehiclePlate.trim()) return;
+
+    // Generate coordinate based on zone
+    const zoneCoords: Record<string, [number, number]> = {
+      "Sector 12 Hospital Zone": [23.033, 72.586],
+      "Sector 21 APMC Yard": [23.045, 72.548],
+      "Sector 11 Corridor": [23.028, 72.574],
+      "Zone 2 Central Depot": [23.018, 72.562],
+    };
+
+    const [lat, lng] = zoneCoords[newVehicleZone] || [23.025, 72.57];
+
+    const newVeh: FleetVehicle = {
+      id: `VEH-0${vehicles.length + 1}`,
+      plate: newVehiclePlate.toUpperCase().trim(),
+      type: newVehicleType,
+      capacityKg: Number(newVehicleCapacity),
+      currentLoadKg: 0,
+      status: "AVAILABLE",
+      driver: newVehicleDriver || "Unassigned",
+      lat,
+      lng,
+      zone: newVehicleZone,
+    };
+
+    setVehicles([...vehicles, newVeh]);
+    setIsAddModalOpen(false);
+    setNewVehiclePlate("");
+    setNewVehicleDriver("");
+    setSuccessToast(`✅ Vehicle ${newVeh.plate} successfully registered & deployed to map!`);
+    setTimeout(() => setSuccessToast(null), 4500);
+  };
+
+  // Add Driver Form Handler
+  const handleAddDriver = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newDriverName.trim()) return;
+
+    const newDrv: FleetDriver = {
+      id: `DRV-0${drivers.length + 1}`,
+      name: newDriverName.trim(),
+      phone: newDriverPhone.trim() || "+91 98765 00000",
+      license: newDriverLicense.trim() || `GJ-01-2026-DRV-${Math.floor(10 + Math.random() * 90)}`,
+      zone: newDriverZone,
+      assignedTruck: newDriverTruck || "None",
+      status: "ACTIVE",
+    };
+
+    setDrivers([...drivers, newDrv]);
+    setIsAddModalOpen(false);
+    setNewDriverName("");
+    setNewDriverPhone("");
+    setNewDriverLicense("");
+    setSuccessToast(`✅ Driver ${newDrv.name} registered and added to municipal fleet!`);
+    setTimeout(() => setSuccessToast(null), 4500);
+  };
+
+  // Grounded Agent Query Function
+  const handleAgentQuery = (query: string) => {
+    setAgentLoading(true);
+    setAgentResponse(null);
+
+    setTimeout(() => {
+      let groundedAnswer = "";
+      const q = query.toLowerCase();
+
+      if (q.includes("prioritize") || q.includes("tomorrow") || q.includes("area")) {
+        groundedAnswer =
+          "**Priority Recommendation for Tomorrow (Grounded in Live Data):**\n\n" +
+          "1. **Sector 21 APMC Yard** (High Risk: 89% accumulation probability, predicted 1,850 kg organic waste by 09:30 AM). **Action:** Pre-dispatch Truck `GJ-01-WM-9120` (Tipper 3T) by 06:00 AM.\n\n" +
+          "2. **Sector 12 Civil Hospital Red Zone** (Active P0 Incident `INC-8091` / Sensitive healthcare buffer). **Action:** Retain Compactor `GJ-01-WM-4402` on priority standby.\n\n" +
+          "3. **Central Railway Depot Zone 2** (`INC-8042`, 4 reports clustered). **Action:** Route Mini Truck `GJ-01-WM-8820`.\n\n" +
+          "*Data Sources: 14 citizen reports, 3 predictive hotspot models, 3 fleet telemetry feeds.*";
+      } else if (q.includes("fleet") || q.includes("truck") || q.includes("vehicle")) {
+        groundedAnswer =
+          `**Current Fleet Telemetry Status (${vehicles.length} Units Active):**\n\n` +
+          vehicles
+            .map(
+              (v) =>
+                `• **${v.plate}** (${v.type}): Status **${v.status}** · Payload: ${v.currentLoadKg}/${v.capacityKg} kg (${Math.round((v.currentLoadKg / v.capacityKg) * 100)}%) · Driver: **${v.driver}** · Zone: ${v.zone}`
+            )
+            .join("\n") +
+          "\n\n*All units GPS tracking & WebSocket telemetry active.*";
+      } else if (q.includes("environment") || q.includes("co2") || q.includes("fuel") || q.includes("impact")) {
+        groundedAnswer =
+          "**Environmental Impact Summary (SDG 11, 12, 13):**\n\n" +
+          "• **Fuel Saved:** 142.8 L (via TSP route clustering & Loop C dynamic preemption)\n" +
+          "• **CO₂ Avoided:** 382.7 kg\n" +
+          "• **Distance Reduced:** 89.4 km vs static fixed routes\n" +
+          "• **Route Efficiency Gain:** +23.1%\n" +
+          "• **Equivalent Trees Planted:** 17.6\n\n" +
+          "*Data Source: Logged GPS breadcrumb analytics vs historical baseline.*";
+      } else if (q.includes("zone") || q.includes("why")) {
+        groundedAnswer =
+          "**Zone Prioritization Reasoning (Multi-Factor Scoring Engine):**\n\n" +
+          "• **Sensitive Location Weight (0.35):** Within 200m of Civil Hospital pediatric wing (multiplier: 1.8x).\n" +
+          "• **Clustered Citizen Consensus (0.25):** 8 distinct photo reports clustered within 45m.\n" +
+          "• **CV Severity Score (0.20):** 8.4/10 (Bio-hazard / medical waste packaging identified).\n" +
+          "• **SLA Urgency (0.20):** Target resolution <2 hours; 36 minutes remaining.\n\n" +
+          "*Result: Composite priority score 9.42/10 → Escalated to P0 Emergency.*";
+      } else {
+        groundedAnswer =
+          `**Municipal Intelligence Response for: "${query}"**\n\n` +
+          `• Evaluated ${incidents.length} active incidents across Gandhinagar & Ahmedabad zones.\n` +
+          `• ${vehicles.length} fleet vehicles operating with dynamic route optimization active.\n` +
+          `• Priority consensus: P0 Hospital Red Zone is top municipal priority.\n\n` +
+          `*Data Sources: Live Spatial DB, PostGIS Clusters, Fleet Telemetry Engine.*`;
+      }
+
+      setAgentResponse(groundedAnswer);
+      setAgentHistory((prev) => [...prev, { q: query, a: groundedAnswer }]);
+      setAgentLoading(false);
+    }, 600);
+  };
+
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -294,128 +524,170 @@ export default function OfficerPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
+          {/* Add Vehicle / Driver Button */}
+          <button
+            onClick={() => setIsAddModalOpen(true)}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-[var(--color-primary)] text-white hover:opacity-90 shadow-sm cursor-pointer transition-all"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>Add Vehicle / Driver</span>
+          </button>
+
           {/* Loop C Demo Simulator Trigger */}
           <button
             onClick={handleSimulateLoopC}
             disabled={isRecomputing}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold text-white shadow-sm hover:opacity-90 cursor-pointer animate-pulse"
-            style={{ backgroundColor: "var(--color-p0-emergency)" }}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-sm cursor-pointer transition-all disabled:opacity-50"
           >
-            <Zap className="w-3.5 h-3.5" />
+            <Zap className="w-3.5 h-3.5 text-amber-200 animate-pulse" />
             <span>Simulate P0 Emergency (Loop C)</span>
           </button>
 
+          {/* Recompute Priorities Button */}
           <button
             onClick={handleRecomputePriorities}
             disabled={isRecomputing}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-white border border-slate-200 hover:bg-slate-50 shadow-sm cursor-pointer"
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 shadow-sm cursor-pointer transition-all disabled:opacity-50"
           >
-            <RefreshCw className={`w-3.5 h-3.5 text-slate-600 ${isRecomputing ? "animate-spin" : ""}`} />
-            <span>Recompute Priority</span>
+            <RefreshCw className={`w-3.5 h-3.5 text-slate-500 ${isRecomputing ? "animate-spin" : ""}`} />
+            <span>Re-Triage</span>
           </button>
-
-          <div className="flex items-center gap-2 bg-emerald-50 text-emerald-800 border border-emerald-200 px-3 py-1.5 rounded-xl text-xs font-semibold">
-            <span className="w-2 h-2 rounded-full bg-emerald-600 animate-ping" />
-            <span>WebSocket Live</span>
-          </div>
         </div>
       </div>
 
+      {/* Recompute / Dynamic Alert Banner */}
       {recomputeAlert && (
-        <div className="mb-4 p-3.5 rounded-xl bg-amber-50 border border-amber-300 text-xs text-amber-950 font-bold flex items-center justify-between shadow-sm">
-          <span>{recomputeAlert}</span>
+        <div className="mb-6 p-4 rounded-2xl bg-amber-500 text-white shadow-lg flex items-center justify-between text-xs font-bold animate-in fade-in slide-in-from-top-2 duration-300">
+          <div className="flex items-center gap-2">
+            <Zap className="w-4 h-4 text-amber-100 animate-pulse flex-shrink-0" />
+            <span>{recomputeAlert}</span>
+          </div>
         </div>
       )}
 
-      {/* Bento Grid Top Row: Key Metrics */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
-        {[
-          { label: "Active Incidents", value: `${incidents.length}`, change: "+3 clustered today", alert: true },
-          { label: "Predicted Hotspots", value: "4 Zones", change: "89% peak risk", highlight: true },
-          { label: "Active Fleet", value: "8 / 10", change: "80% utilization" },
-          { label: "Route Distance Saved", value: "14.2 km", change: "18% fuel saved" },
-          { label: "CO₂ Avoided", value: "38.1 kg", change: "SDG 11 / 12 aligned", safe: true },
-          { label: "Avg Response", value: "28 min", change: "44% faster" },
-        ].map((kpi, i) => (
-          <div
-            key={i}
-            className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm flex flex-col justify-between"
-            style={{ borderRadius: "var(--radius-card)" }}
-          >
-            <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1">
-              {kpi.label}
-            </p>
-            <p
-              className={`text-2xl font-extrabold ${
-                kpi.alert
-                  ? "text-red-700"
-                  : kpi.highlight
-                  ? "text-[var(--color-accent)]"
-                  : kpi.safe
-                  ? "text-emerald-700"
-                  : "text-[var(--color-primary)]"
-              }`}
-            >
-              {kpi.value}
-            </p>
-            <span className="text-[10px] text-slate-400 font-medium mt-1">{kpi.change}</span>
+      {/* Success Toast Banner */}
+      {successToast && (
+        <div className="mb-6 p-4 rounded-2xl bg-emerald-700 text-white shadow-lg flex items-center gap-2 text-xs font-bold animate-in fade-in slide-in-from-top-2 duration-300">
+          <CheckCircle2 className="w-4 h-4 text-emerald-200 flex-shrink-0" />
+          <span>{successToast}</span>
+        </div>
+      )}
+
+      {/* =============== TOP KPI ROW =============== */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Total Incidents</span>
+            <span className="p-2 rounded-xl bg-slate-50 text-slate-600"><AlertTriangle className="w-4 h-4" /></span>
           </div>
-        ))}
+          <div className="text-2xl font-black text-slate-900">{incidents.length} Active</div>
+          <span className="text-[11px] font-semibold text-emerald-600">8 clustered reports consensus</span>
+        </div>
+
+        <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">P0 Emergencies</span>
+            <span className="p-2 rounded-xl bg-red-50 text-red-600"><Flame className="w-4 h-4" /></span>
+          </div>
+          <div className="text-2xl font-black text-[#C1272D]">{incidents.filter(i => i.priority === "P0").length} Critical</div>
+          <span className="text-[11px] font-semibold text-red-600">Hospital Red Zone Active</span>
+        </div>
+
+        <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Active Fleet</span>
+            <span className="p-2 rounded-xl bg-teal-50 text-teal-700"><Truck className="w-4 h-4" /></span>
+          </div>
+          <div className="text-2xl font-black text-teal-800">{vehicles.length} Units</div>
+          <span className="text-[11px] font-semibold text-teal-700">Dynamic routing connected</span>
+        </div>
+
+        <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">SLA Compliance</span>
+            <span className="p-2 rounded-xl bg-emerald-50 text-emerald-700"><CheckCircle2 className="w-4 h-4" /></span>
+          </div>
+          <div className="text-2xl font-black text-emerald-800">94.8%</div>
+          <span className="text-[11px] font-semibold text-emerald-600">+4.2% vs static routes</span>
+        </div>
       </div>
 
-      {/* Main Grid: Interactive Map + Real-time Incident Triage */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Left Column: Interactive Map (8 cols) */}
-        <div className="lg:col-span-7 xl:col-span-8 bg-white rounded-2xl p-4 border border-slate-200 shadow-sm flex flex-col h-[620px]">
-          {/* Map Controls */}
-          <div className="flex flex-wrap items-center justify-between gap-2 mb-3 px-2">
-            <div className="flex items-center gap-2">
-              <Layers className="w-4 h-4 text-slate-500" />
-              <span className="text-xs font-bold text-slate-800">Live Spatial Routing & Hotspot Layer</span>
-            </div>
-            <div className="flex items-center gap-2 text-xs">
-              <span className="flex items-center gap-1 font-bold text-[var(--color-primary)]">
-                <Route className="w-3.5 h-3.5" /> Dynamic Polyline Active
-              </span>
-              <button
-                onClick={() => setShowHotspots(!showHotspots)}
-                className={`px-2.5 py-1 rounded-lg font-bold border transition-colors cursor-pointer ${
-                  showHotspots
-                    ? "bg-amber-100 text-amber-900 border-amber-300"
-                    : "bg-slate-50 text-slate-600 border-slate-200"
-                }`}
-              >
-                🔥 Hotspots: {showHotspots ? "ON" : "OFF"}
-              </button>
-              <span className="px-2 py-0.5 rounded-md bg-red-100 text-red-800 font-bold">P0 Emergency</span>
-              <span className="px-2 py-0.5 rounded-md bg-teal-100 text-teal-800 font-bold">🚛 Live Fleet</span>
-            </div>
-          </div>
+      {/* =============== MAIN MAP & INCIDENT TRIAGE BENTO =============== */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Left Col: Spatial Map & Pre-Deployment Controls (8 Cols) */}
+        <div className="lg:col-span-7 xl:col-span-8 space-y-4">
+          <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-3 px-1">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-slate-900">Spatial Intelligence Map</span>
+                <span className="text-[11px] font-bold text-teal-800 bg-teal-50 px-2 py-0.5 rounded-full border border-teal-200">
+                  {mapPoints.length} Live Nodes
+                </span>
+              </div>
 
-          {/* MapLibre Container with Dynamic Route Polyline */}
-          <div className="flex-1 w-full relative">
-            <MapLibreView
-              points={mapPoints}
-              routePolyline={routeCoordinates}
-              onSelectPoint={(pt) => {
-                const found = incidents.find((i) => i.id === pt.id);
-                if (found) setSelectedIncident(found);
-              }}
-            />
+              {/* Map Layer Controls */}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowHotspots(!showHotspots)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                    showHotspots
+                      ? "bg-amber-100 text-amber-900 border border-amber-300"
+                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  }`}
+                >
+                  <Flame className="w-3.5 h-3.5 text-amber-700" />
+                  <span>Predicted Hotspots (AI)</span>
+                </button>
+              </div>
+            </div>
+
+            {/* MapLibre Spatial View */}
+            <div className="h-[420px] w-full rounded-xl overflow-hidden relative">
+              <MapLibreView
+                center={[72.5714, 23.03]}
+                zoom={12.8}
+                points={mapPoints}
+                routePolyline={routeCoordinates}
+                onSelectPoint={(p) => {
+                  const matchingInc = incidents.find((i) => i.id === p.id);
+                  if (matchingInc) setSelectedIncident(matchingInc);
+                }}
+              />
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 mt-3 pt-3 border-t border-slate-100 text-xs text-slate-600">
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-full bg-[#C1272D]" />
+                  <span className="font-semibold text-slate-700">P0 Hospital Emergency</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-full bg-[#2B8C86]" />
+                  <span className="font-semibold text-slate-700">Municipal Truck</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-full bg-[#E86A33]" />
+                  <span className="font-semibold text-slate-700">AI Predicted Hotspot</span>
+                </div>
+              </div>
+              <span className="text-[11px] font-bold text-emerald-700">Route: TSP Optimized (OSRM Engine)</span>
+            </div>
           </div>
         </div>
 
-        {/* Right Column: Triage Incident Queue (5 cols) */}
-        <div className="lg:col-span-5 xl:col-span-4 bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex flex-col h-[620px]">
-          <div className="flex items-center justify-between mb-3 pb-3 border-b border-slate-100">
-            <div>
-              <h2 className="text-sm font-bold">Incident Triage Queue</h2>
-              <p className="text-xs text-slate-500">Auto-ranked by Dynamic Priority Engine</p>
+        {/* Right Col: Incident Triage Feed (4 Cols) */}
+        <div className="lg:col-span-5 xl:col-span-4 bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex flex-col h-[500px]">
+          <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-[var(--color-primary)]" />
+              <h2 className="text-sm font-bold">Active Incident Triage</h2>
             </div>
+            
+            {/* Filter Dropdown */}
             <select
               value={filterPriority}
               onChange={(e) => setFilterPriority(e.target.value)}
-              className="text-xs border border-slate-200 rounded-lg px-2.5 py-1 bg-slate-50 font-semibold"
+              className="text-xs font-semibold px-2 py-1 rounded-lg border border-slate-200 bg-slate-50 focus:outline-none"
             >
               <option value="ALL">All Severities</option>
               <option value="P0">P0 Emergency</option>
@@ -500,6 +772,98 @@ export default function OfficerPage() {
               </div>
             ))}
           </div>
+        </div>
+      </div>
+
+      {/* =============== FLEET & DRIVERS MANAGEMENT ROW =============== */}
+      <div className="mt-6 bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 pb-3 border-b border-slate-100">
+          <div className="flex items-center gap-2">
+            <Truck className="w-4.5 h-4.5 text-[var(--color-primary)]" />
+            <div>
+              <h2 className="text-sm font-bold">Active Fleet & Driver Management</h2>
+              <p className="text-[10px] text-slate-500">Live payload capacity, driver telemetry, and dynamic municipal assignment</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                setAddModalTab("vehicle");
+                setIsAddModalOpen(true);
+              }}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-50 border border-slate-200 text-slate-700 hover:bg-slate-100 transition-all cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5 text-emerald-700" /> + Add Vehicle
+            </button>
+            <button
+              onClick={() => {
+                setAddModalTab("driver");
+                setIsAddModalOpen(true);
+              }}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-50 border border-slate-200 text-slate-700 hover:bg-slate-100 transition-all cursor-pointer"
+            >
+              <UserPlus className="w-3.5 h-3.5 text-teal-700" /> + Add Driver
+            </button>
+          </div>
+        </div>
+
+        {/* Vehicles Grid Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {vehicles.map((v) => {
+            const loadPercent = Math.round((v.currentLoadKg / v.capacityKg) * 100);
+            return (
+              <div
+                key={v.id}
+                className="p-4 rounded-xl border border-slate-200 bg-[#FAF8F5]/50 hover:bg-white hover:shadow-md transition-all space-y-3"
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="font-mono text-xs font-extrabold text-slate-900">{v.plate}</span>
+                    <p className="text-[11px] text-slate-500 font-semibold">{v.type}</p>
+                  </div>
+                  <span
+                    className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                      v.status === "EN_ROUTE"
+                        ? "bg-teal-100 text-teal-800"
+                        : v.status === "COLLECTING"
+                        ? "bg-amber-100 text-amber-800"
+                        : "bg-emerald-100 text-emerald-800"
+                    }`}
+                  >
+                    {v.status}
+                  </span>
+                </div>
+
+                {/* Capacity Meter */}
+                <div>
+                  <div className="flex justify-between text-[11px] font-semibold text-slate-600 mb-1">
+                    <span>Bin Payload</span>
+                    <span>{v.currentLoadKg} / {v.capacityKg} kg ({loadPercent}%)</span>
+                  </div>
+                  <div className="w-full h-2 rounded-full bg-slate-200 overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all ${
+                        loadPercent > 80 ? "bg-red-600" : "bg-[var(--color-aqua)]"
+                      }`}
+                      style={{ width: `${loadPercent}%` }}
+                    />
+                  </div>
+                </div>
+
+                {/* Driver & Operating Zone Info */}
+                <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between text-[11px]">
+                  <div className="flex items-center gap-1.5 text-slate-700 font-medium">
+                    <Users className="w-3.5 h-3.5 text-slate-400" />
+                    <span>{v.driver || "Unassigned"}</span>
+                  </div>
+                  <span className="text-[10px] text-slate-500 font-medium truncate max-w-[130px]">
+                    📍 {v.zone}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -644,28 +1008,28 @@ export default function OfficerPage() {
                 key={i}
                 className={`p-3 rounded-xl border text-xs ${
                   alert.type === "critical"
-                    ? "bg-red-50 border-red-200"
+                    ? "bg-red-50/70 border-red-200 text-red-900"
                     : alert.type === "warning"
-                    ? "bg-amber-50 border-amber-200"
+                    ? "bg-amber-50/70 border-amber-200 text-amber-900"
                     : alert.type === "ai"
-                    ? "bg-blue-50 border-blue-200"
-                    : "bg-slate-50 border-slate-200"
+                    ? "bg-emerald-50/70 border-emerald-200 text-emerald-900"
+                    : "bg-slate-50 border-slate-200 text-slate-700"
                 }`}
               >
-                <div className="flex items-start justify-between gap-2 mb-1">
-                  <h3 className={`font-bold text-xs leading-tight ${
-                    alert.type === "critical" ? "text-red-900" : alert.type === "warning" ? "text-amber-900" : alert.type === "ai" ? "text-blue-900" : "text-slate-800"
-                  }`}>
-                    {alert.type === "ai" && "🤖 "}{alert.title}
-                  </h3>
-                  <span className="text-[10px] text-slate-400 flex-shrink-0">{alert.time}</span>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="font-bold">{alert.title}</span>
+                  <span className="text-[10px] opacity-70">{alert.time}</span>
                 </div>
-                <p className="text-[11px] text-slate-600 mb-2">{alert.message}</p>
+                <p className="text-[11px] opacity-90 mb-2">{alert.message}</p>
                 {alert.action && (
-                  <button className={`text-[10px] font-bold px-2 py-1 rounded-lg cursor-pointer ${
-                    alert.type === "critical" ? "bg-red-700 text-white" : alert.type === "warning" ? "bg-amber-700 text-white" : "bg-blue-700 text-white"
-                  }`}>
-                    {alert.action}
+                  <button
+                    onClick={() => {
+                      if (alert.type === "critical") setSelectedIncident(incidents[0]);
+                      else handleRecomputePriorities();
+                    }}
+                    className="text-[10px] font-bold px-2 py-0.5 rounded bg-white border shadow-xs hover:opacity-80 cursor-pointer"
+                  >
+                    {alert.action} →
                   </button>
                 )}
               </div>
@@ -673,89 +1037,248 @@ export default function OfficerPage() {
           </div>
         </div>
       </div>
+
+      {/* =============== MODAL: REGISTER VEHICLE OR DRIVER =============== */}
+      {isAddModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl p-6 sm:p-8 w-full max-w-lg shadow-2xl border border-slate-100 relative">
+            <button
+              onClick={() => setIsAddModalOpen(false)}
+              className="absolute top-6 right-6 p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            {/* Modal Tabs Header */}
+            <div className="flex items-center gap-2 mb-6 border-b border-slate-100 pb-4">
+              <button
+                type="button"
+                onClick={() => setAddModalTab("vehicle")}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                  addModalTab === "vehicle"
+                    ? "bg-[var(--color-primary)] text-white shadow-sm"
+                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                }`}
+              >
+                <Truck className="w-4 h-4" />
+                <span>+ Register Vehicle</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setAddModalTab("driver")}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                  addModalTab === "driver"
+                    ? "bg-[var(--color-primary)] text-white shadow-sm"
+                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                }`}
+              >
+                <UserPlus className="w-4 h-4" />
+                <span>+ Register Driver</span>
+              </button>
+            </div>
+
+            {/* TAB 1: ADD VEHICLE FORM */}
+            {addModalTab === "vehicle" && (
+              <form onSubmit={handleAddVehicle} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    License Plate Number *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. GJ-01-WM-5520"
+                    value={newVehiclePlate}
+                    onChange={(e) => setNewVehiclePlate(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl text-xs border border-slate-200 focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/30 font-mono font-bold"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Vehicle Type
+                    </label>
+                    <select
+                      value={newVehicleType}
+                      onChange={(e) => setNewVehicleType(e.target.value)}
+                      className="w-full px-3 py-2.5 rounded-xl text-xs border border-slate-200 focus:outline-none font-medium"
+                    >
+                      <option value="Compactor 5T">Compactor 5T</option>
+                      <option value="Tipper 3T">Tipper 3T</option>
+                      <option value="Mini Truck 1.5T">Mini Truck 1.5T</option>
+                      <option value="Electric Van 1T">Electric Van 1T</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Payload Capacity (kg)
+                    </label>
+                    <input
+                      type="number"
+                      required
+                      min={500}
+                      max={15000}
+                      value={newVehicleCapacity}
+                      onChange={(e) => setNewVehicleCapacity(Number(e.target.value))}
+                      className="w-full px-3.5 py-2.5 rounded-xl text-xs border border-slate-200 focus:outline-none font-medium"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Assign Driver
+                  </label>
+                  <select
+                    value={newVehicleDriver}
+                    onChange={(e) => setNewVehicleDriver(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl text-xs border border-slate-200 focus:outline-none font-medium"
+                  >
+                    <option value="">Select a driver (or assign later)</option>
+                    {drivers.map((d) => (
+                      <option key={d.id} value={d.name}>
+                        {d.name} ({d.phone})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Operating Sector / Depot
+                  </label>
+                  <select
+                    value={newVehicleZone}
+                    onChange={(e) => setNewVehicleZone(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl text-xs border border-slate-200 focus:outline-none font-medium"
+                  >
+                    <option value="Sector 12 Hospital Zone">Sector 12 Hospital Zone</option>
+                    <option value="Sector 21 APMC Yard">Sector 21 APMC Yard</option>
+                    <option value="Sector 11 Corridor">Sector 11 Corridor</option>
+                    <option value="Zone 2 Central Depot">Zone 2 Central Depot</option>
+                  </select>
+                </div>
+
+                <div className="pt-3 flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsAddModalOpen(false)}
+                    className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2.5 rounded-xl text-xs font-bold bg-[var(--color-primary)] text-white hover:opacity-90 shadow-sm cursor-pointer"
+                  >
+                    Deploy Vehicle to Fleet
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* TAB 2: ADD DRIVER FORM */}
+            {addModalTab === "driver" && (
+              <form onSubmit={handleAddDriver} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Driver Full Name *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Ramesh Prajapati"
+                    value={newDriverName}
+                    onChange={(e) => setNewDriverName(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl text-xs border border-slate-200 focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/30 font-medium"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Phone Number *
+                    </label>
+                    <input
+                      type="tel"
+                      required
+                      placeholder="+91 98765 12340"
+                      value={newDriverPhone}
+                      onChange={(e) => setNewDriverPhone(e.target.value)}
+                      className="w-full px-3.5 py-2.5 rounded-xl text-xs border border-slate-200 focus:outline-none font-medium"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      License Number
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="GJ-01-2026-DRV-12"
+                      value={newDriverLicense}
+                      onChange={(e) => setNewDriverLicense(e.target.value)}
+                      className="w-full px-3.5 py-2.5 rounded-xl text-xs border border-slate-200 focus:outline-none font-medium font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Assign to Existing Truck (Optional)
+                  </label>
+                  <select
+                    value={newDriverTruck}
+                    onChange={(e) => setNewDriverTruck(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl text-xs border border-slate-200 focus:outline-none font-medium"
+                  >
+                    <option value="">None (Standby Driver)</option>
+                    {vehicles.map((v) => (
+                      <option key={v.id} value={v.plate}>
+                        {v.plate} ({v.type})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Assigned Municipal Zone
+                  </label>
+                  <select
+                    value={newDriverZone}
+                    onChange={(e) => setNewDriverZone(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl text-xs border border-slate-200 focus:outline-none font-medium"
+                  >
+                    <option value="Sector 12 Hospital Zone">Sector 12 Hospital Zone</option>
+                    <option value="Sector 21 APMC Yard">Sector 21 APMC Yard</option>
+                    <option value="Sector 11 Corridor">Sector 11 Corridor</option>
+                    <option value="Zone 2 Central Depot">Zone 2 Central Depot</option>
+                  </select>
+                </div>
+
+                <div className="pt-3 flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsAddModalOpen(false)}
+                    className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2.5 rounded-xl text-xs font-bold bg-[var(--color-primary)] text-white hover:opacity-90 shadow-sm cursor-pointer"
+                  >
+                    Register Driver
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
-
-  function handleAgentQuery(query: string) {
-    setAgentLoading(true);
-    setAgentQuery("");
-
-    // Simulate grounded agent response
-    setTimeout(() => {
-      const lowerQ = query.toLowerCase();
-      let answer = "";
-
-      if (lowerQ.includes("priorit") || lowerQ.includes("tomorrow") || lowerQ.includes("focus")) {
-        answer = `**Priority Recommendation based on 14 active incidents and 4 predicted hotspots:**
-
-1. **Sector 21 APMC Market** — 4 active incidents (avg P1)
-2. **Sector 11 Residential Corridor** — 3 active incidents (avg P1)
-3. **Sector 12 Civil Hospital Buffer** — 2 active incidents (avg P0)
-
-**Tomorrow's Predicted Surges:**
-- Sector 21 APMC Market: expected 4.2m³ — dispatch by 06:00 AM
-- Sector 7 School Cluster: expected 1.8m³ — dispatch by 07:30 AM
-
-⚠️ 2 SLA violations currently active. 5 incidents unresolved >4 hours.
-
-_Data sources: incidents.top_zones, hotspots.predicted_tomorrow_`;
-      } else if (lowerQ.includes("fleet") || lowerQ.includes("vehicle") || lowerQ.includes("truck")) {
-        answer = `**Fleet Status — 8/10 vehicles active (80% utilization):**
-
-- **GJ-01-WM-4402** (Compactor) — EN_ROUTE, 49% loaded, 3 tasks
-- **GJ-01-WM-9120** (Tipper) — COLLECTING, 72% loaded, 2 tasks
-- **GJ-01-WM-8820** (Compactor) — AVAILABLE, 0% loaded, 0 tasks
-- **GJ-01-WM-5510** (Electric Mini) — AVAILABLE, 0% loaded, 0 tasks
-
-1 in maintenance, 1 offline.
-
-_Data source: fleet.vehicles_`;
-      } else if (lowerQ.includes("environment") || lowerQ.includes("co2") || lowerQ.includes("fuel") || lowerQ.includes("sdg")) {
-        answer = `**Environmental Impact Dashboard (SDG 11 & 12):**
-
-- Fuel saved: **142.8 liters**
-- CO₂ avoided: **382.7 kg**
-- Distance reduced: **89.4 km**
-- Route efficiency improvement: **23.1%**
-- Waste diverted from landfill: **4,200 kg**
-
-Aligned with: SDG 11 (Sustainable Cities), SDG 12 (Responsible Consumption)
-
-_Data source: environmental.*_`;
-      } else if (lowerQ.includes("zone") || lowerQ.includes("why") || lowerQ.includes("high")) {
-        answer = `**Zone Priority Analysis:**
-
-- **Sector 21 APMC Market**: 4 incidents, avg priority P1 — Hotspot reason: Daily wholesale market influx generates 3.2T organic waste
-- **Sector 11 Residential Corridor**: 3 incidents, avg priority P1
-- **Sector 12 Hospital Buffer**: 2 incidents, avg priority P0 — Hotspot reason: Bio-medical waste accumulation near pediatric wing
-- **Railway Depot Zone 2**: 2 incidents, avg priority P2
-
-_Data sources: incidents.top_zones, hotspots.critical_zones_`;
-      } else if (lowerQ.includes("analytic") || lowerQ.includes("performance") || lowerQ.includes("sla")) {
-        answer = `**Today's Operational Performance:**
-
-- Collections completed: **18**
-- Waste collected: **12,400 kg**
-- Avg response time: **28 minutes**
-- SLA compliance: **91.2%**
-- Citizen satisfaction: **87.5%**
-- Repeat incident rate: **8.3%**
-
-_Data source: analytics.today_`;
-      } else {
-        answer = `**System Overview:**
-
-- **14** active incidents (2 P0 emergencies)
-- **8/10** vehicles active (80% utilization)
-- **18** collections completed today (12,400 kg)
-- Avg response: **28 min** | SLA compliance: **91.2%**
-- 2 SLA violations | 5 unresolved >4h
-
-_Data sources: incidents.summary, fleet.summary, analytics.today_`;
-      }
-
-      setAgentHistory(prev => [...prev, { q: query, a: answer }]);
-      setAgentLoading(false);
-    }, 800);
-  }
 }
