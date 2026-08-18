@@ -115,6 +115,8 @@ interface CitizenReportDetail {
 
 export default function OfficerPage() {
   const [filterPriority, setFilterPriority] = useState<string>("ALL");
+  const [filterTime, setFilterTime] = useState<string>("LATEST");
+  const [filterZone, setFilterZone] = useState<string>("ALL");
   const [showHotspots, setShowHotspots] = useState<boolean>(true);
   const [isRecomputing, setIsRecomputing] = useState(false);
   const [recomputeAlert, setRecomputeAlert] = useState<string | null>(null);
@@ -418,10 +420,70 @@ export default function OfficerPage() {
     return points;
   }, [incidents, vehicles, showHotspots]);
 
-  const filteredIncidents =
-    filterPriority === "ALL"
-      ? incidents
-      : incidents.filter((i) => i.priority === filterPriority);
+  useEffect(() => {
+    const loadSyncedData = () => {
+      try {
+        const syncedIncidents = JSON.parse(localStorage.getItem("sync_incidents") || "[]");
+        const syncedDetails = JSON.parse(localStorage.getItem("sync_report_details") || "[]");
+        
+        if (syncedIncidents.length > 0) {
+          setIncidents(prev => {
+            const existingIds = new Set(prev.map(p => p.id));
+            const newIncidents = syncedIncidents.filter((i: any) => !existingIds.has(i.id));
+            return [...newIncidents, ...prev];
+          });
+        }
+        
+        if (syncedDetails.length > 0) {
+          setCitizenReports(prev => {
+            const existingIds = new Set(prev.map(p => p.reportId));
+            const newDetails = syncedDetails.filter((r: any) => !existingIds.has(r.reportId));
+            return [...newDetails, ...prev];
+          });
+        }
+      } catch (e) {
+        console.error("Failed to load synced reports", e);
+      }
+    };
+
+    loadSyncedData();
+    window.addEventListener("storage", loadSyncedData);
+    
+    // Fallback: poll every 2s for demo purposes just in case they are in the same tab/window 
+    // where storage events might not fire properly for the same document
+    const interval = setInterval(loadSyncedData, 2000);
+
+    return () => {
+      window.removeEventListener("storage", loadSyncedData);
+      clearInterval(interval);
+    };
+  }, []);
+
+  const getMinutes = (timeStr: string) => {
+    if (timeStr === "Just now") return 0;
+    let mins = 0;
+    const h = timeStr.match(/(\d+)\s*h/);
+    const m = timeStr.match(/(\d+)\s*m/);
+    if (h) mins += parseInt(h[1]) * 60;
+    if (m) mins += parseInt(m[1]);
+    return mins;
+  };
+
+  const filteredIncidents = incidents
+    .filter((i) => filterPriority === "ALL" || i.priority === filterPriority)
+    .filter((i) => {
+      if (filterZone === "ALL") return true;
+      const text = (i.title + " " + (i.sensitiveLocation || "") + " " + (i.category || "")).toLowerCase();
+      if (filterZone === "SECTOR_12") return text.includes("sector 12");
+      if (filterZone === "SECTOR_21") return text.includes("sector 21");
+      if (filterZone === "RAILWAY") return text.includes("railway") || text.includes("zone 2");
+      return true;
+    })
+    .sort((a, b) => {
+      const minsA = getMinutes(a.timeAgo);
+      const minsB = getMinutes(b.timeAgo);
+      return filterTime === "LATEST" ? minsA - minsB : minsB - minsA;
+    });
 
   const handleDispatch = (id: string) => {
     setIncidents((prev) =>
@@ -851,23 +913,45 @@ export default function OfficerPage() {
 
         {/* Right Col: Incident Triage Feed (4 Cols) */}
         <div className="lg:col-span-5 xl:col-span-4 bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex flex-col h-[500px]">
-          <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
+          <div className="flex flex-col gap-2 mb-4 pb-3 border-b border-slate-100">
             <div className="flex items-center gap-2">
               <AlertTriangle className="w-4 h-4 text-[var(--color-primary)]" />
               <h2 className="text-sm font-bold">Active Incident Triage</h2>
             </div>
             
-            {/* Filter Dropdown */}
-            <select
-              value={filterPriority}
-              onChange={(e) => setFilterPriority(e.target.value)}
-              className="text-xs font-semibold px-2 py-1 rounded-lg border border-slate-200 bg-slate-50 focus:outline-none"
-            >
-              <option value="ALL">All Severities</option>
-              <option value="P0">P0 Emergency</option>
-              <option value="P1">P1 High</option>
-              <option value="P2">P2 Normal</option>
-            </select>
+            {/* Filter Dropdowns */}
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                value={filterPriority}
+                onChange={(e) => setFilterPriority(e.target.value)}
+                className="text-[10px] font-semibold px-2 py-1 rounded-lg border border-slate-200 bg-slate-50 focus:outline-none"
+              >
+                <option value="ALL">All Severities</option>
+                <option value="P0">P0 Emergency</option>
+                <option value="P1">P1 High</option>
+                <option value="P2">P2 Normal</option>
+              </select>
+
+              <select
+                value={filterTime}
+                onChange={(e) => setFilterTime(e.target.value)}
+                className="text-[10px] font-semibold px-2 py-1 rounded-lg border border-slate-200 bg-slate-50 focus:outline-none"
+              >
+                <option value="LATEST">Latest First</option>
+                <option value="OLDEST">Oldest First</option>
+              </select>
+
+              <select
+                value={filterZone}
+                onChange={(e) => setFilterZone(e.target.value)}
+                className="text-[10px] font-semibold px-2 py-1 rounded-lg border border-slate-200 bg-slate-50 focus:outline-none max-w-[120px]"
+              >
+                <option value="ALL">All Locations</option>
+                <option value="SECTOR_12">Sector 12</option>
+                <option value="SECTOR_21">Sector 21</option>
+                <option value="RAILWAY">Railway / Zone 2</option>
+              </select>
+            </div>
           </div>
 
           {/* Incidents Scrollable List */}

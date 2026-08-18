@@ -159,6 +159,49 @@ export default function CitizenPage() {
         imageCount: images.length,
       };
 
+      // --- NEW: Sync to Officer Portal via localStorage ---
+      const officerIncident = {
+        id: `INC-C${Math.floor(1000 + Math.random() * 9000)}`,
+        title: `${category.toUpperCase()} at ${address.split(',')[0]}`,
+        category: category.toUpperCase(),
+        priority: newReport.priority,
+        status: "REPORTED",
+        lat: coords?.lat || 23.0330,
+        lng: coords?.lng || 72.5860,
+        reportsCount: 1,
+        timeAgo: "Just now",
+        slaMinutesLeft: newReport.priority === "P1" ? 120 : 240,
+      };
+      
+      const officerReportDetail = {
+        reportId: newReport.id,
+        incidentId: officerIncident.id,
+        reporterName: "Citizen User",
+        reporterPhone: "+91 90000 00000",
+        description: description || "No description provided.",
+        address: address,
+        category: category.toUpperCase(),
+        photos: images.length > 0 ? images : ["/demo-report-1.jpg"],
+        submittedAt: new Date().toLocaleString(),
+        aiCategory: aiAnalysis?.category || "Unknown",
+        aiConfidence: aiAnalysis?.confidence || 0.8,
+        aiSeverity: aiAnalysis?.severityScore || 5.0,
+        aiVolume: aiAnalysis?.volumeM3 || 1.0,
+        aiTags: aiAnalysis?.tags || ["user_report"],
+        aiRecommendedAction: aiAnalysis?.recommendedAction || "Investigate user report",
+      };
+
+      try {
+        const existingIncidents = JSON.parse(localStorage.getItem("sync_incidents") || "[]");
+        const existingDetails = JSON.parse(localStorage.getItem("sync_report_details") || "[]");
+        localStorage.setItem("sync_incidents", JSON.stringify([officerIncident, ...existingIncidents]));
+        localStorage.setItem("sync_report_details", JSON.stringify([officerReportDetail, ...existingDetails]));
+        window.dispatchEvent(new Event("storage"));
+      } catch (e) {
+        console.error("Storage sync failed", e);
+      }
+      // ----------------------------------------------------
+
       setReportsList([newReport, ...reportsList]);
       setSubmittedReport(newReport);
       setSubmitting(false);
