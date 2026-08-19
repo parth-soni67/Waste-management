@@ -395,17 +395,18 @@ export default function CitizenPage() {
                   )}
 
                   <label className="border-2 border-dashed border-slate-300 hover:border-[var(--color-primary)] rounded-xl p-6 flex flex-col items-center justify-center cursor-pointer transition-colors bg-[#FAF8F5]">
-                    <UploadCloud className="w-8 h-8 text-[var(--color-primary)] mb-2" />
+                    <Camera className="w-8 h-8 text-[var(--color-primary)] mb-2" />
                     <span className="text-xs font-semibold text-slate-700">
-                      Click or drag photos to upload
+                      Tap to open camera & capture live photo
                     </span>
-                    <span className="text-[11px] text-slate-400 mt-1">
-                      JPEG, PNG, WebP (Max 10MB per file · EXIF stripped server-side)
+                    <span className="text-[11px] text-slate-400 mt-1 text-center leading-relaxed">
+                      Live camera capture is required to prevent fraudulent or outdated reports.<br/>(JPEG, PNG, WebP · Max 10MB)
                     </span>
                     <input
                       type="file"
                       multiple
                       accept="image/*"
+                      capture="environment"
                       onChange={handleImageUpload}
                       className="hidden"
                     />
