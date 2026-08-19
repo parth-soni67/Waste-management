@@ -41,6 +41,9 @@ import {
   User,
   Calendar,
   Tag,
+  Edit2,
+  Trash2,
+  Wrench,
 } from "lucide-react";
 import Link from "next/link";
 import type { MapPoint } from "@/components/map/MapLibreView";
@@ -134,6 +137,11 @@ export default function OfficerPage() {
   // Fleet Section Tab & Filter
   const [fleetTab, setFleetTab] = useState<"vehicles" | "drivers">("vehicles");
   const [fleetZoneFilter, setFleetZoneFilter] = useState("All Zones");
+
+  // Edit State
+  const [modalMode, setModalMode] = useState<"add" | "edit">("add");
+  const [editingVehicleId, setEditingVehicleId] = useState<string | null>(null);
+  const [editingDriverId, setEditingDriverId] = useState<string | null>(null);
 
   const [reportDrawerOpen, setReportDrawerOpen] = useState(false);
   const [selectedReportDetail, setSelectedReportDetail] = useState<CitizenReportDetail | null>(null);
@@ -605,63 +613,140 @@ export default function OfficerPage() {
     }, 700);
   };
 
-  // Add Vehicle Form Handler
-  const handleAddVehicle = (e: React.FormEvent) => {
+  // Vehicle Handlers
+  const handleOpenAddVehicle = () => {
+    setModalMode("add");
+    setEditingVehicleId(null);
+    setNewVehiclePlate("");
+    setNewVehicleType("Compactor 5T");
+    setNewVehicleCapacity(5000);
+    setNewVehicleDriver("");
+    setNewVehicleZone("Sector 12 Hospital Zone");
+    setAddModalTab("vehicle");
+    setIsAddModalOpen(true);
+  };
+
+  const handleEditVehicle = (v: FleetVehicle) => {
+    setModalMode("edit");
+    setEditingVehicleId(v.id);
+    setNewVehiclePlate(v.plate);
+    setNewVehicleType(v.type);
+    setNewVehicleCapacity(v.capacityKg);
+    setNewVehicleDriver(v.driver || "");
+    setNewVehicleZone(v.zone);
+    setAddModalTab("vehicle");
+    setIsAddModalOpen(true);
+  };
+
+  const handleToggleVehicleStatus = (id: string) => {
+    setVehicles((prev) => prev.map((v) => v.id === id ? { ...v, status: v.status === "MAINTENANCE" ? "AVAILABLE" : "MAINTENANCE" } : v));
+  };
+
+  const handleDeleteVehicle = (id: string) => {
+    if (confirm("Are you sure you want to remove this vehicle?")) {
+      setVehicles((prev) => prev.filter((v) => v.id !== id));
+    }
+  };
+
+  const handleSaveVehicle = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newVehiclePlate.trim()) return;
 
-    // Generate coordinate based on zone
-    const zoneCoords: Record<string, [number, number]> = {
-      "Sector 12 Hospital Zone": [23.033, 72.586],
-      "Sector 21 APMC Yard": [23.045, 72.548],
-      "Sector 11 Corridor": [23.028, 72.574],
-      "Zone 2 Central Depot": [23.018, 72.562],
-    };
+    if (modalMode === "edit" && editingVehicleId) {
+      setVehicles((prev) => prev.map((v) => v.id === editingVehicleId ? {
+        ...v, plate: newVehiclePlate.toUpperCase().trim(), type: newVehicleType, capacityKg: Number(newVehicleCapacity), driver: newVehicleDriver || "Unassigned", zone: newVehicleZone
+      } : v));
+      setSuccessToast(`✅ Vehicle ${newVehiclePlate} updated successfully!`);
+    } else {
+      const zoneCoords: Record<string, [number, number]> = {
+        "Sector 12 Hospital Zone": [23.033, 72.586],
+        "Sector 21 APMC Yard": [23.045, 72.548],
+        "Sector 11 Corridor": [23.028, 72.574],
+        "Zone 2 Central Depot": [23.018, 72.562],
+      };
+      const [lat, lng] = zoneCoords[newVehicleZone] || [23.025, 72.57];
 
-    const [lat, lng] = zoneCoords[newVehicleZone] || [23.025, 72.57];
+      const newVeh: FleetVehicle = {
+        id: `VEH-0${vehicles.length + 1}`,
+        plate: newVehiclePlate.toUpperCase().trim(),
+        type: newVehicleType,
+        capacityKg: Number(newVehicleCapacity),
+        currentLoadKg: 0,
+        status: "AVAILABLE",
+        driver: newVehicleDriver || "Unassigned",
+        lat,
+        lng,
+        zone: newVehicleZone,
+      };
 
-    const newVeh: FleetVehicle = {
-      id: `VEH-0${vehicles.length + 1}`,
-      plate: newVehiclePlate.toUpperCase().trim(),
-      type: newVehicleType,
-      capacityKg: Number(newVehicleCapacity),
-      currentLoadKg: 0,
-      status: "AVAILABLE",
-      driver: newVehicleDriver || "Unassigned",
-      lat,
-      lng,
-      zone: newVehicleZone,
-    };
-
-    setVehicles([...vehicles, newVeh]);
+      setVehicles([newVeh, ...vehicles]);
+      setSuccessToast(`✅ Vehicle ${newVeh.plate} successfully registered!`);
+    }
+    
     setIsAddModalOpen(false);
-    setNewVehiclePlate("");
-    setNewVehicleDriver("");
-    setSuccessToast(`✅ Vehicle ${newVeh.plate} successfully registered & deployed to map!`);
     setTimeout(() => setSuccessToast(null), 4500);
   };
 
-  // Add Driver Form Handler
-  const handleAddDriver = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newDriverName.trim()) return;
-
-    const newDrv: FleetDriver = {
-      id: `DRV-0${drivers.length + 1}`,
-      name: newDriverName.trim(),
-      phone: newDriverPhone.trim() || "+91 98765 00000",
-      license: newDriverLicense.trim() || `GJ-01-2026-DRV-${Math.floor(10 + Math.random() * 90)}`,
-      zone: newDriverZone,
-      assignedTruck: newDriverTruck || "None",
-      status: "ACTIVE",
-    };
-
-    setDrivers([...drivers, newDrv]);
-    setIsAddModalOpen(false);
+  // Driver Handlers
+  const handleOpenAddDriver = () => {
+    setModalMode("add");
+    setEditingDriverId(null);
     setNewDriverName("");
     setNewDriverPhone("");
     setNewDriverLicense("");
-    setSuccessToast(`✅ Driver ${newDrv.name} registered and added to municipal fleet!`);
+    setNewDriverZone("Sector 21 APMC Yard");
+    setNewDriverTruck("");
+    setAddModalTab("driver");
+    setIsAddModalOpen(true);
+  };
+
+  const handleEditDriver = (d: FleetDriver) => {
+    setModalMode("edit");
+    setEditingDriverId(d.id);
+    setNewDriverName(d.name);
+    setNewDriverPhone(d.phone);
+    setNewDriverLicense(d.license);
+    setNewDriverZone(d.zone);
+    setNewDriverTruck(d.assignedTruck || "");
+    setAddModalTab("driver");
+    setIsAddModalOpen(true);
+  };
+
+  const handleToggleDriverStatus = (id: string) => {
+    setDrivers((prev) => prev.map((d) => d.id === id ? { ...d, status: d.status === "ON LEAVE" ? "ACTIVE" : "ON LEAVE" } : d));
+  };
+
+  const handleDeleteDriver = (id: string) => {
+    if (confirm("Are you sure you want to remove this driver?")) {
+      setDrivers((prev) => prev.filter((d) => d.id !== id));
+    }
+  };
+
+  const handleSaveDriver = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newDriverName.trim()) return;
+
+    if (modalMode === "edit" && editingDriverId) {
+      setDrivers((prev) => prev.map((d) => d.id === editingDriverId ? {
+        ...d, name: newDriverName.trim(), phone: newDriverPhone.trim() || "+91 98765 00000", license: newDriverLicense.trim(), zone: newDriverZone, assignedTruck: newDriverTruck || "None"
+      } : d));
+      setSuccessToast(`✅ Driver ${newDriverName} updated successfully!`);
+    } else {
+      const newDrv: FleetDriver = {
+        id: `DRV-0${drivers.length + 1}`,
+        name: newDriverName.trim(),
+        phone: newDriverPhone.trim() || "+91 98765 00000",
+        license: newDriverLicense.trim() || `GJ-01-2026-DRV-${Math.floor(10 + Math.random() * 90)}`,
+        zone: newDriverZone,
+        assignedTruck: newDriverTruck || "None",
+        status: "ACTIVE",
+      };
+
+      setDrivers([newDrv, ...drivers]);
+      setSuccessToast(`✅ Driver ${newDrv.name} registered and added to municipal fleet!`);
+    }
+
+    setIsAddModalOpen(false);
     setTimeout(() => setSuccessToast(null), 4500);
   };
 
@@ -1100,19 +1185,13 @@ export default function OfficerPage() {
             </div>
 
             <button
-              onClick={() => {
-                setAddModalTab("vehicle");
-                setIsAddModalOpen(true);
-              }}
+              onClick={handleOpenAddVehicle}
               className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-50 border border-slate-200 text-slate-700 hover:bg-slate-100 transition-all cursor-pointer ml-1"
             >
               <Plus className="w-3.5 h-3.5 text-emerald-700" /> <span className="hidden sm:inline">Add</span> Vehicle
             </button>
             <button
-              onClick={() => {
-                setAddModalTab("driver");
-                setIsAddModalOpen(true);
-              }}
+              onClick={handleOpenAddDriver}
               className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-50 border border-slate-200 text-slate-700 hover:bg-slate-100 transition-all cursor-pointer"
             >
               <UserPlus className="w-3.5 h-3.5 text-teal-700" /> <span className="hidden sm:inline">Add</span> Driver
@@ -1176,6 +1255,19 @@ export default function OfficerPage() {
                       📍 {v.zone}
                     </span>
                   </div>
+                  
+                  {/* Actions Row */}
+                  <div className="pt-2 border-t border-slate-100 flex items-center justify-end gap-2">
+                    <button onClick={() => handleEditVehicle(v)} className="p-1 text-slate-400 hover:text-blue-600 transition-colors cursor-pointer" title="Edit Vehicle">
+                      <Edit2 className="w-3.5 h-3.5" />
+                    </button>
+                    <button onClick={() => handleToggleVehicleStatus(v.id)} className="p-1 text-slate-400 hover:text-amber-600 transition-colors cursor-pointer" title="Toggle Maintenance">
+                      <Wrench className="w-3.5 h-3.5" />
+                    </button>
+                    <button onClick={() => handleDeleteVehicle(v.id)} className="p-1 text-slate-400 hover:text-red-600 transition-colors cursor-pointer" title="Remove Vehicle">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
               );
             })}
@@ -1219,6 +1311,19 @@ export default function OfficerPage() {
                 </div>
                 <div className="pt-1 flex items-center justify-between text-[11px] text-slate-500">
                   <span>📱 {d.phone}</span>
+                </div>
+
+                {/* Actions Row */}
+                <div className="pt-2 border-t border-slate-100 flex items-center justify-end gap-2">
+                  <button onClick={() => handleEditDriver(d)} className="p-1 text-slate-400 hover:text-blue-600 transition-colors cursor-pointer" title="Edit Driver">
+                    <Edit2 className="w-3.5 h-3.5" />
+                  </button>
+                  <button onClick={() => handleToggleDriverStatus(d.id)} className="p-1 text-slate-400 hover:text-amber-600 transition-colors cursor-pointer" title="Toggle Leave">
+                    <Wrench className="w-3.5 h-3.5" />
+                  </button>
+                  <button onClick={() => handleDeleteDriver(d.id)} className="p-1 text-slate-400 hover:text-red-600 transition-colors cursor-pointer" title="Remove Driver">
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               </div>
             ))}
@@ -1420,7 +1525,7 @@ export default function OfficerPage() {
                 }`}
               >
                 <Truck className="w-4 h-4" />
-                <span>+ Register Vehicle</span>
+                <span>{modalMode === "edit" ? "Edit Vehicle" : "+ Register Vehicle"}</span>
               </button>
               <button
                 type="button"
@@ -1432,13 +1537,13 @@ export default function OfficerPage() {
                 }`}
               >
                 <UserPlus className="w-4 h-4" />
-                <span>+ Register Driver</span>
+                <span>{modalMode === "edit" ? "Edit Driver" : "+ Register Driver"}</span>
               </button>
             </div>
 
             {/* TAB 1: ADD VEHICLE FORM */}
             {addModalTab === "vehicle" && (
-              <form onSubmit={handleAddVehicle} className="space-y-4">
+              <form onSubmit={handleSaveVehicle} className="space-y-4">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
                     License Plate Number *
@@ -1532,7 +1637,7 @@ export default function OfficerPage() {
                     type="submit"
                     className="px-5 py-2.5 rounded-xl text-xs font-bold bg-[var(--color-primary)] text-white hover:opacity-90 shadow-sm cursor-pointer"
                   >
-                    Deploy Vehicle to Fleet
+                    {modalMode === "edit" ? "Save Changes" : "Deploy Vehicle to Fleet"}
                   </button>
                 </div>
               </form>
@@ -1540,7 +1645,7 @@ export default function OfficerPage() {
 
             {/* TAB 2: ADD DRIVER FORM */}
             {addModalTab === "driver" && (
-              <form onSubmit={handleAddDriver} className="space-y-4">
+              <form onSubmit={handleSaveDriver} className="space-y-4">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
                     Driver Full Name *
@@ -1630,7 +1735,7 @@ export default function OfficerPage() {
                     type="submit"
                     className="px-5 py-2.5 rounded-xl text-xs font-bold bg-[var(--color-primary)] text-white hover:opacity-90 shadow-sm cursor-pointer"
                   >
-                    Register Driver
+                    {modalMode === "edit" ? "Save Changes" : "Register Driver"}
                   </button>
                 </div>
               </form>
