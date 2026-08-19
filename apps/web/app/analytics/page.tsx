@@ -21,10 +21,11 @@ import {
   Zap,
   ShieldCheck,
   Award,
+  DollarSign,
 } from "lucide-react";
 
 export default function AnalyticsPage() {
-  const [activeTab, setActiveTab] = useState<"operational" | "environmental">("operational");
+  const [activeTab, setActiveTab] = useState<"operational" | "environmental" | "financial">("operational");
 
   // Operational KPIs
   const kpis = {
@@ -149,6 +150,16 @@ export default function AnalyticsPage() {
             }`}
           >
             <Leaf className="w-3.5 h-3.5 inline mr-1" /> Environmental Impact
+          </button>
+          <button
+            onClick={() => setActiveTab("financial")}
+            className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+              activeTab === "financial"
+                ? "bg-amber-600 text-white"
+                : "text-slate-600 hover:bg-slate-50"
+            }`}
+          >
+            <DollarSign className="w-3.5 h-3.5 inline mr-1" /> Financial Cost Report
           </button>
         </div>
       </div>
@@ -399,6 +410,94 @@ export default function AnalyticsPage() {
             </div>
           </div>
         </>
+      )}
+
+      {/* =============== FINANCIAL TAB =============== */}
+      {activeTab === "financial" && (
+        <div className="space-y-6">
+          {/* Top Level Financial Summary */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            {[
+              { label: "Total Operations Cost (MTD)", value: "₹4,28,400", sub: "-12% vs last month", color: "text-slate-900" },
+              { label: "Fuel Expenses", value: "₹1,45,200", sub: "₹38,500 saved via routing", color: "text-amber-600" },
+              { label: "Maintenance & Repair", value: "₹42,800", sub: "2 active maintenance logs", color: "text-red-600" },
+              { label: "Cost Per Ton of Waste", value: "₹34.5", sub: "Target: ₹32.0", color: "text-[var(--color-primary)]" },
+            ].map((stat, idx) => (
+              <div key={idx} className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+                <p className="text-xs font-bold text-slate-500 mb-2">{stat.label}</p>
+                <p className={`text-2xl font-black ${stat.color} mb-1`}>{stat.value}</p>
+                <p className="text-[10px] font-semibold text-emerald-600 bg-emerald-50 inline-block px-2 py-0.5 rounded-md">
+                  {stat.sub}
+                </p>
+              </div>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Cost Breakdown */}
+            <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+              <h2 className="text-sm font-bold mb-4 flex items-center gap-2 text-slate-800">
+                <Activity className="w-4 h-4 text-slate-400" /> Operational Cost Breakdown
+              </h2>
+              <div className="space-y-4">
+                {[
+                  { category: "Fleet Fuel (Diesel & EV Charging)", amount: "₹1,45,200", pct: 34 },
+                  { category: "Driver & Crew Wages", amount: "₹1,85,000", pct: 43 },
+                  { category: "Vehicle Maintenance", amount: "₹42,800", pct: 10 },
+                  { category: "Disposal Facility Fees", amount: "₹55,400", pct: 13 },
+                ].map((item, i) => (
+                  <div key={i}>
+                    <div className="flex items-center justify-between text-xs font-semibold mb-1">
+                      <span className="text-slate-700">{item.category}</span>
+                      <span className="text-slate-900">{item.amount} ({item.pct}%)</span>
+                    </div>
+                    <div className="w-full bg-slate-100 rounded-full h-2.5">
+                      <div
+                        className="h-full rounded-full bg-amber-500 transition-all"
+                        style={{ width: `${item.pct}%` }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Savings & ROI from AI Routing */}
+            <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex flex-col justify-between">
+              <div>
+                <h2 className="text-sm font-bold mb-4 flex items-center gap-2 text-emerald-700">
+                  <TrendingUp className="w-4 h-4" /> AI Routing ROI & Savings
+                </h2>
+                <div className="space-y-3">
+                  <div className="flex items-start gap-3">
+                    <div className="p-2 bg-emerald-100 rounded-lg">
+                      <Fuel className="w-4 h-4 text-emerald-700" />
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-slate-900">Reduced Mileage Savings</p>
+                      <p className="text-[11px] text-slate-500">Dynamic routing bypassed 89.4 km of unnecessary travel this week, directly saving fuel.</p>
+                      <p className="text-sm font-black text-emerald-600 mt-1">₹12,450 / week</p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3 mt-4">
+                    <div className="p-2 bg-emerald-100 rounded-lg">
+                      <Clock className="w-4 h-4 text-emerald-700" />
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-slate-900">Overtime Wage Reduction</p>
+                      <p className="text-[11px] text-slate-500">By optimizing shift allocations and reducing average response time to 28 mins.</p>
+                      <p className="text-sm font-black text-emerald-600 mt-1">₹8,200 / week</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-500">Total Monthly Savings vs Baseline</span>
+                <span className="text-lg font-black text-emerald-700">₹82,600</span>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

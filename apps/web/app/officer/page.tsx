@@ -641,6 +641,12 @@ export default function OfficerPage() {
   };
 
   const handleToggleVehicleStatus = (id: string) => {
+    const vehicleToUpdate = vehicles.find(v => v.id === id);
+    if (vehicleToUpdate && vehicleToUpdate.status !== "MAINTENANCE" && vehicleToUpdate.currentLoadKg > 0) {
+      alert(`Cannot mark vehicle ${vehicleToUpdate.plate} for maintenance. It currently has a payload of ${vehicleToUpdate.currentLoadKg} kg. Please dispatch it to unload first.`);
+      return;
+    }
+
     let unassignedDriverName = "";
     
     setVehicles((prev) => prev.map((v) => {
