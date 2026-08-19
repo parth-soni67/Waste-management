@@ -399,13 +399,15 @@ export default function OfficerPage() {
 
     // Add all fleet vehicles dynamically
     vehicles.forEach((veh) => {
-      points.push({
-        id: veh.id,
-        lat: veh.lat,
-        lng: veh.lng,
-        title: `${veh.plate} (${veh.type} · Driver: ${veh.driver || "Unassigned"})`,
-        type: "vehicle" as const,
-      });
+      if (veh.status !== "MAINTENANCE") {
+        points.push({
+          id: veh.id,
+          lat: veh.lat,
+          lng: veh.lng,
+          title: `${veh.plate} (${veh.type} · Driver: ${veh.driver || "Unassigned"})`,
+          type: "vehicle" as const,
+        });
+      }
     });
 
     // Add Predicted Hotspots if layer toggled on
@@ -639,12 +641,36 @@ export default function OfficerPage() {
   };
 
   const handleToggleVehicleStatus = (id: string) => {
-    setVehicles((prev) => prev.map((v) => v.id === id ? { ...v, status: v.status === "MAINTENANCE" ? "AVAILABLE" : "MAINTENANCE" } : v));
+    let unassignedDriverName = "";
+    
+    setVehicles((prev) => prev.map((v) => {
+      if (v.id === id) {
+        const isGoingToMaintenance = v.status !== "MAINTENANCE";
+        if (isGoingToMaintenance) {
+          unassignedDriverName = v.driver || "";
+          return { ...v, status: "MAINTENANCE", currentLoadKg: 0, driver: undefined };
+        } else {
+          return { ...v, status: "AVAILABLE" };
+        }
+      }
+      return v;
+    }));
+
+    if (unassignedDriverName) {
+      setDrivers((prev) => prev.map((d) => d.name === unassignedDriverName ? { ...d, assignedTruck: undefined } : d));
+    }
   };
 
   const handleDeleteVehicle = (id: string) => {
     if (confirm("Are you sure you want to remove this vehicle?")) {
-      setVehicles((prev) => prev.filter((v) => v.id !== id));
+      let driverName = "";
+      setVehicles((prev) => prev.filter((v) => {
+        if (v.id === id) driverName = v.driver || "";
+        return v.id !== id;
+      }));
+      if (driverName) {
+        setDrivers((prev) => prev.map((d) => d.name === driverName ? { ...d, assignedTruck: undefined } : d));
+      }
     }
   };
 
@@ -713,12 +739,35 @@ export default function OfficerPage() {
   };
 
   const handleToggleDriverStatus = (id: string) => {
-    setDrivers((prev) => prev.map((d) => d.id === id ? { ...d, status: d.status === "ON LEAVE" ? "ACTIVE" : "ON LEAVE" } : d));
+    let unassignedTruckPlate = "";
+    setDrivers((prev) => prev.map((d) => {
+      if (d.id === id) {
+        const isGoingOnLeave = d.status !== "ON LEAVE";
+        if (isGoingOnLeave) {
+          unassignedTruckPlate = d.assignedTruck || "";
+          return { ...d, status: "ON LEAVE", assignedTruck: undefined };
+        } else {
+          return { ...d, status: "ACTIVE" };
+        }
+      }
+      return d;
+    }));
+
+    if (unassignedTruckPlate) {
+      setVehicles((prev) => prev.map((v) => v.plate === unassignedTruckPlate ? { ...v, driver: undefined } : v));
+    }
   };
 
   const handleDeleteDriver = (id: string) => {
     if (confirm("Are you sure you want to remove this driver?")) {
-      setDrivers((prev) => prev.filter((d) => d.id !== id));
+      let truckPlate = "";
+      setDrivers((prev) => prev.filter((d) => {
+        if (d.id === id) truckPlate = d.assignedTruck || "";
+        return d.id !== id;
+      }));
+      if (truckPlate) {
+        setVehicles((prev) => prev.map((v) => v.plate === truckPlate ? { ...v, driver: undefined } : v));
+      }
     }
   };
 
