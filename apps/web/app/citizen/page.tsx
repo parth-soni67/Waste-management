@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   Camera,
   UploadCloud,
@@ -17,6 +17,7 @@ import {
   ChevronRight,
   Eye,
   Layers,
+  X
 } from "lucide-react";
 import Link from "next/link";
 
@@ -91,25 +92,65 @@ export default function CitizenPage() {
     },
   ]);
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      const newFiles = Array.from(e.target.files);
-      const newUrls = newFiles.map((file) => URL.createObjectURL(file));
-      setImages((prev) => [...prev, ...newUrls].slice(0, 5));
+  // --- Live Camera Capture Logic ---
+  const [isCameraActive, setIsCameraActive] = useState(false);
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
-      // Trigger instant Computer Vision Analysis Simulation
-      setAnalyzingImage(true);
-      setTimeout(() => {
-        setAiAnalysis({
-          category: category === "plastic" ? "Plastic Packaging" : "Mixed Municipal Solid Waste",
-          confidence: 0.94,
-          volumeM3: 2.8,
-          severityScore: 7.6,
-          tags: ["overflow_bin", "plastic_wrappers", "street_spill"],
-          recommendedAction: "Dispatch 5-Tonne Compactor (High Accumulation Rate)",
-        });
-        setAnalyzingImage(false);
-      }, 600);
+  const startCamera = async () => {
+    setIsCameraActive(true);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { facingMode: "environment" } 
+      });
+      setCameraStream(stream);
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+    } catch (err) {
+      console.error("Error accessing camera:", err);
+      alert("Could not access the camera. Please ensure you have given camera permissions.");
+      setIsCameraActive(false);
+    }
+  };
+
+  const stopCamera = () => {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(track => track.stop());
+    }
+    setCameraStream(null);
+    setIsCameraActive(false);
+  };
+
+  const capturePhoto = () => {
+    if (videoRef.current && canvasRef.current) {
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+        setImages(prev => [...prev, dataUrl].slice(0, 5));
+        
+        stopCamera();
+        
+        // Trigger instant Computer Vision Analysis Simulation
+        setAnalyzingImage(true);
+        setTimeout(() => {
+          setAiAnalysis({
+            category: category === "plastic" ? "Plastic Packaging" : "Mixed Municipal Solid Waste",
+            confidence: 0.94,
+            volumeM3: 2.8,
+            severityScore: 7.6,
+            tags: ["overflow_bin", "plastic_wrappers", "street_spill"],
+            recommendedAction: "Dispatch 5-Tonne Compactor (High Accumulation Rate)",
+          });
+          setAnalyzingImage(false);
+        }, 600);
+      }
     }
   };
 
@@ -215,7 +256,13 @@ export default function CitizenPage() {
 
   useEffect(() => {
     setMounted(true);
-  }, []);
+    return () => {
+      // Cleanup camera on unmount
+      if (cameraStream) {
+        cameraStream.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, [cameraStream]);
 
   if (!mounted) {
     return (
@@ -394,23 +441,49 @@ export default function CitizenPage() {
                     </div>
                   )}
 
-                  <label className="border-2 border-dashed border-slate-300 hover:border-[var(--color-primary)] rounded-xl p-6 flex flex-col items-center justify-center cursor-pointer transition-colors bg-[#FAF8F5]">
-                    <Camera className="w-8 h-8 text-[var(--color-primary)] mb-2" />
-                    <span className="text-xs font-semibold text-slate-700">
-                      Tap to open camera & capture live photo
-                    </span>
-                    <span className="text-[11px] text-slate-400 mt-1 text-center leading-relaxed">
-                      Live camera capture is required to prevent fraudulent or outdated reports.<br/>(JPEG, PNG, WebP · Max 10MB)
-                    </span>
-                    <input
-                      type="file"
-                      multiple
-                      accept="image/*"
-                      capture="environment"
-                      onChange={handleImageUpload}
-                      className="hidden"
-                    />
-                  </label>
+                  {isCameraActive ? (
+                    <div className="flex flex-col items-center bg-slate-900 rounded-xl overflow-hidden relative w-full aspect-video">
+                      <video 
+                        ref={videoRef} 
+                        autoPlay 
+                        playsInline 
+                        className="w-full h-full object-cover"
+                      />
+                      <canvas ref={canvasRef} className="hidden" />
+                      
+                      {/* Camera Controls */}
+                      <div className="absolute bottom-4 left-0 right-0 flex justify-center gap-4">
+                        <button
+                          type="button"
+                          onClick={capturePhoto}
+                          className="bg-white text-slate-900 px-6 py-2.5 rounded-full text-xs font-bold shadow-lg hover:bg-slate-100 transition-colors cursor-pointer"
+                        >
+                          Capture Photo
+                        </button>
+                        <button
+                          type="button"
+                          onClick={stopCamera}
+                          className="bg-red-600 text-white p-2.5 rounded-full shadow-lg hover:bg-red-700 transition-colors cursor-pointer"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button 
+                      type="button"
+                      onClick={startCamera}
+                      className="w-full border-2 border-dashed border-slate-300 hover:border-[var(--color-primary)] rounded-xl p-6 flex flex-col items-center justify-center cursor-pointer transition-colors bg-[#FAF8F5]"
+                    >
+                      <Camera className="w-8 h-8 text-[var(--color-primary)] mb-2" />
+                      <span className="text-xs font-semibold text-slate-700">
+                        Tap to open camera & capture live photo
+                      </span>
+                      <span className="text-[11px] text-slate-400 mt-1 text-center leading-relaxed">
+                        Live camera capture is required to prevent fraudulent or outdated reports.
+                      </span>
+                    </button>
+                  )}
                 </div>
 
                 {/* Location Picker */}
