@@ -24,51 +24,119 @@ import {
   DollarSign,
 } from "lucide-react";
 
+interface OperationalKPIs {
+  collections_completed: number;
+  waste_collected_kg: number;
+  avg_response_minutes: number;
+  sla_compliance_pct: number;
+  citizen_satisfaction_pct: number;
+  repeat_incident_rate_pct: number;
+  active_incidents: number;
+  resolved_today: number;
+  fleet_utilization_pct: number;
+  route_efficiency_pct: number;
+}
+
+interface EnvironmentalImpact {
+  fuel_saved_liters: number;
+  co2_avoided_kg: number;
+  distance_reduced_km: number;
+  waste_diverted_from_landfill_kg: number;
+  route_efficiency_improvement_pct: number;
+  trees_equivalent: number;
+  sdg_alignment: string[];
+}
+
+interface TrendData {
+  labels: string[];
+  collections: number[];
+  waste_kg: number[];
+  avg_response: number[];
+  sla_compliance: number[];
+}
+
+interface ZoneBreakdown {
+  zone: string;
+  incidents: number;
+  waste_kg: number;
+  priority: string;
+  status: string;
+}
+
+interface DashboardPayload {
+  kpis: OperationalKPIs;
+  environmental: EnvironmentalImpact;
+  weekly_trend: TrendData;
+  zone_breakdown: ZoneBreakdown[];
+  priority_distribution: Record<string, number>;
+}
+
 export default function AnalyticsPage() {
   const [activeTab, setActiveTab] = useState<"operational" | "environmental" | "financial">("operational");
+  const [dashboardData, setDashboardData] = useState<DashboardPayload | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  // Fetch live backend metrics on load
+  React.useEffect(() => {
+    const fetchAnalytics = async () => {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      try {
+        const res = await fetch(`${apiUrl}/api/v1/analytics/dashboard`);
+        if (res.ok) {
+          const data: DashboardPayload = await res.json();
+          setDashboardData(data);
+        }
+      } catch (err) {
+        console.warn("Could not fetch backend analytics, using fallback state", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    const timer = setTimeout(() => {
+      void fetchAnalytics();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, []);
 
   // Operational KPIs
-  const kpis = {
-    collectionsCompleted: 18,
-    wasteCollectedKg: 12400,
-    avgResponseMinutes: 28,
-    slaCompliancePct: 91.2,
-    citizenSatisfactionPct: 87.5,
-    repeatIncidentRatePct: 8.3,
-    activeIncidents: 14,
-    resolvedToday: 12,
-    fleetUtilizationPct: 80.0,
-    routeEfficiencyPct: 82.4,
+  const kpis = dashboardData?.kpis || {
+    collections_completed: 0,
+    waste_collected_kg: 0,
+    avg_response_minutes: 0,
+    sla_compliance_pct: 100,
+    citizen_satisfaction_pct: 100,
+    repeat_incident_rate_pct: 0,
+    active_incidents: 0,
+    resolved_today: 0,
+    fleet_utilization_pct: 0,
+    route_efficiency_pct: 100,
   };
 
   // Environmental impact
-  const env = {
-    fuelSavedLiters: 142.8,
-    co2AvoidedKg: 382.7,
-    distanceReducedKm: 89.4,
-    wasteDivertedKg: 4200,
-    routeEfficiencyPct: 23.1,
-    treesEquivalent: 17.6,
+  const env = dashboardData?.environmental || {
+    fuel_saved_liters: 0,
+    co2_avoided_kg: 0,
+    distance_reduced_km: 0,
+    waste_diverted_from_landfill_kg: 0,
+    route_efficiency_improvement_pct: 0,
+    trees_equivalent: 0,
+    sdg_alignment: [
+      "SDG 11 — Sustainable Cities & Communities",
+      "SDG 12 — Responsible Consumption & Production",
+      "SDG 13 — Climate Action",
+    ],
   };
 
   // Weekly trend data for inline mini charts
-  const weeklyCollections = [14, 16, 19, 15, 18, 22, 18];
-  const weeklyResponse = [34, 31, 29, 32, 28, 26, 28];
-  const weeklySLA = [85.0, 87.2, 89.5, 86.8, 90.1, 93.4, 91.2];
-  const weeklyWaste = [8200, 9400, 11800, 9100, 10600, 14200, 12400];
-  const dayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const weeklyCollections = dashboardData?.weekly_trend?.collections || [0, 0, 0, 0, 0, 0, 0];
+  const weeklyResponse = dashboardData?.weekly_trend?.avg_response || [0, 0, 0, 0, 0, 0, 0];
+  const weeklySLA = dashboardData?.weekly_trend?.sla_compliance || [100, 100, 100, 100, 100, 100, 100];
+  const weeklyWaste = dashboardData?.weekly_trend?.waste_kg || [0, 0, 0, 0, 0, 0, 0];
 
   // Zone breakdown
-  const zones = [
-    { zone: "Sector 21 APMC Market", incidents: 4, wasteKg: 3200, priority: "P1", status: "Active" },
-    { zone: "Sector 12 Hospital", incidents: 2, wasteKg: 1800, priority: "P0", status: "Critical" },
-    { zone: "Sector 11 Residential", incidents: 3, wasteKg: 2100, priority: "P1", status: "Active" },
-    { zone: "Railway Depot Zone 2", incidents: 2, wasteKg: 1400, priority: "P2", status: "Active" },
-    { zone: "Sector 3 Industrial", incidents: 2, wasteKg: 3300, priority: "P2", status: "Active" },
-    { zone: "Sector 7 School Cluster", incidents: 1, wasteKg: 600, priority: "P3", status: "Monitored" },
-  ];
+  const zones = dashboardData?.zone_breakdown || [];
 
-  const priorityDist = { P0: 2, P1: 3, P2: 4, P3: 3, P4: 2 };
+  const priorityDist = dashboardData?.priority_distribution || { P0: 0, P1: 0, P2: 0, P3: 0, P4: 0 };
   const totalIncidents = Object.values(priorityDist).reduce((s, v) => s + v, 0);
 
   const priorityColors: Record<string, string> = {
@@ -82,7 +150,7 @@ export default function AnalyticsPage() {
     const range = max - min || 1;
     const w = 100;
     const points = data
-      .map((v, i) => `${(i / (data.length - 1)) * w},${height - ((v - min) / range) * (height - 4)}`)
+      .map((v, i) => `${(i / (Math.max(1, data.length - 1))) * w},${height - ((v - min) / range) * (height - 4)}`)
       .join(" ");
     return (
       <svg viewBox={`0 0 ${w} ${height}`} className="w-full" style={{ height }}>
@@ -97,10 +165,10 @@ export default function AnalyticsPage() {
     () => false
   );
 
-  if (!mounted) {
+  if (!mounted || loading) {
     return (
       <div className="min-h-screen bg-[var(--color-canvas)] p-8 flex items-center justify-center">
-        <div className="animate-pulse text-sm text-slate-500 font-medium">Loading Analytics Dashboard...</div>
+        <div className="animate-pulse text-sm text-slate-500 font-medium">Loading Real-Time Analytics Dashboard...</div>
       </div>
     );
   }
@@ -170,11 +238,11 @@ export default function AnalyticsPage() {
           {/* Top KPI Cards */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
             {[
-              { label: "Collections Today", value: kpis.collectionsCompleted, suffix: "", icon: CheckCircle2, color: "text-emerald-700", trend: weeklyCollections },
-              { label: "Waste Collected", value: `${(kpis.wasteCollectedKg / 1000).toFixed(1)}T`, suffix: "", icon: Recycle, color: "text-[var(--color-primary)]", trend: weeklyWaste },
-              { label: "Avg Response", value: kpis.avgResponseMinutes, suffix: " min", icon: Clock, color: "text-teal-700", trend: weeklyResponse, inverted: true },
-              { label: "SLA Compliance", value: kpis.slaCompliancePct, suffix: "%", icon: ShieldCheck, color: "text-emerald-700", trend: weeklySLA },
-              { label: "Citizen Satisfaction", value: kpis.citizenSatisfactionPct, suffix: "%", icon: Users, color: "text-[var(--color-aqua)]" },
+              { label: "Collections Completed", value: kpis.collections_completed, suffix: "", icon: CheckCircle2, color: "text-emerald-700", trend: weeklyCollections },
+              { label: "Waste Collected", value: `${(kpis.waste_collected_kg / 1000).toFixed(1)}T`, suffix: "", icon: Recycle, color: "text-[var(--color-primary)]", trend: weeklyWaste },
+              { label: "Avg Response", value: kpis.avg_response_minutes, suffix: " min", icon: Clock, color: "text-teal-700", trend: weeklyResponse, inverted: true },
+              { label: "SLA Compliance", value: kpis.sla_compliance_pct, suffix: "%", icon: ShieldCheck, color: "text-emerald-700", trend: weeklySLA },
+              { label: "Citizen Satisfaction", value: kpis.citizen_satisfaction_pct, suffix: "%", icon: Users, color: "text-[var(--color-aqua)]" },
             ].map((kpi, i) => (
               <div
                 key={i}
@@ -201,23 +269,23 @@ export default function AnalyticsPage() {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
             <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
               <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Active Incidents</p>
-              <p className="text-3xl font-extrabold text-red-700">{kpis.activeIncidents}</p>
-              <p className="text-[10px] text-slate-400 mt-1">{kpis.resolvedToday} resolved today</p>
+              <p className="text-3xl font-extrabold text-red-700">{kpis.active_incidents}</p>
+              <p className="text-[10px] text-slate-400 mt-1">{kpis.resolved_today} resolved</p>
             </div>
             <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
               <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Fleet Utilization</p>
-              <p className="text-3xl font-extrabold text-[var(--color-aqua)]">{kpis.fleetUtilizationPct}%</p>
-              <p className="text-[10px] text-slate-400 mt-1">8 / 10 vehicles active</p>
+              <p className="text-3xl font-extrabold text-[var(--color-aqua)]">{kpis.fleet_utilization_pct}%</p>
+              <p className="text-[10px] text-slate-400 mt-1">Live active vehicles</p>
             </div>
             <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
               <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Route Efficiency</p>
-              <p className="text-3xl font-extrabold text-[var(--color-primary)]">{kpis.routeEfficiencyPct}%</p>
-              <p className="text-[10px] text-slate-400 mt-1">14.2 km saved today</p>
+              <p className="text-3xl font-extrabold text-[var(--color-primary)]">{kpis.route_efficiency_pct}%</p>
+              <p className="text-[10px] text-slate-400 mt-1">AI Optimized Routing</p>
             </div>
             <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
               <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Repeat Incidents</p>
-              <p className="text-3xl font-extrabold text-amber-700">{kpis.repeatIncidentRatePct}%</p>
-              <p className="text-[10px] text-slate-400 mt-1">↓ 2.1% from last week</p>
+              <p className="text-3xl font-extrabold text-amber-700">{kpis.repeat_incident_rate_pct}%</p>
+              <p className="text-[10px] text-slate-400 mt-1">Clustered consensus</p>
             </div>
           </div>
 
@@ -228,7 +296,7 @@ export default function AnalyticsPage() {
               <h2 className="text-sm font-bold mb-4">Priority Distribution</h2>
               <div className="space-y-3">
                 {Object.entries(priorityDist).map(([p, count]) => {
-                  const pct = (count / totalIncidents) * 100;
+                  const pct = totalIncidents > 0 ? (count / totalIncidents) * 100 : 0;
                   return (
                     <div key={p}>
                       <div className="flex items-center justify-between text-xs font-semibold mb-1">
@@ -272,11 +340,11 @@ export default function AnalyticsPage() {
                       <tr key={i} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
                         <td className="py-3 px-2 font-semibold text-slate-800">{z.zone}</td>
                         <td className="py-3 px-2 text-center font-bold">{z.incidents}</td>
-                        <td className="py-3 px-2 text-center font-medium text-slate-600">{z.wasteKg.toLocaleString()}</td>
+                        <td className="py-3 px-2 text-center font-medium text-slate-600">{z.waste_kg.toLocaleString()}</td>
                         <td className="py-3 px-2 text-center">
                           <span
                             className="text-[10px] font-bold px-2 py-0.5 rounded-full text-white"
-                            style={{ backgroundColor: priorityColors[z.priority] }}
+                            style={{ backgroundColor: priorityColors[z.priority] || "#1F5E3F" }}
                           >
                             {z.priority}
                           </span>
@@ -325,12 +393,12 @@ export default function AnalyticsPage() {
           {/* Environmental KPI Cards */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
             {[
-              { label: "Fuel Saved", value: `${env.fuelSavedLiters}L`, icon: Fuel, color: "text-amber-700", bg: "bg-amber-50" },
-              { label: "CO₂ Avoided", value: `${env.co2AvoidedKg} kg`, icon: Leaf, color: "text-emerald-700", bg: "bg-emerald-50" },
-              { label: "Distance Reduced", value: `${env.distanceReducedKm} km`, icon: TrendingUp, color: "text-[var(--color-primary)]", bg: "bg-[#EDF5F0]" },
-              { label: "Waste Diverted", value: `${(env.wasteDivertedKg / 1000).toFixed(1)}T`, icon: Recycle, color: "text-teal-700", bg: "bg-teal-50" },
-              { label: "Route Efficiency", value: `+${env.routeEfficiencyPct}%`, icon: Zap, color: "text-[var(--color-accent)]", bg: "bg-orange-50" },
-              { label: "Trees Equivalent", value: `${env.treesEquivalent}`, icon: TreePine, color: "text-emerald-700", bg: "bg-emerald-50" },
+              { label: "Fuel Saved", value: `${env.fuel_saved_liters}L`, icon: Fuel, color: "text-amber-700", bg: "bg-amber-50" },
+              { label: "CO₂ Avoided", value: `${env.co2_avoided_kg} kg`, icon: Leaf, color: "text-emerald-700", bg: "bg-emerald-50" },
+              { label: "Distance Reduced", value: `${env.distance_reduced_km} km`, icon: TrendingUp, color: "text-[var(--color-primary)]", bg: "bg-[#EDF5F0]" },
+              { label: "Waste Diverted", value: `${(env.waste_diverted_from_landfill_kg / 1000).toFixed(1)}T`, icon: Recycle, color: "text-teal-700", bg: "bg-teal-50" },
+              { label: "Route Efficiency", value: `+${env.route_efficiency_improvement_pct}%`, icon: Zap, color: "text-[var(--color-accent)]", bg: "bg-orange-50" },
+              { label: "Trees Equivalent", value: `${env.trees_equivalent}`, icon: TreePine, color: "text-emerald-700", bg: "bg-emerald-50" },
             ].map((kpi, i) => (
               <div
                 key={i}
@@ -376,7 +444,7 @@ export default function AnalyticsPage() {
               </div>
               <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs font-bold">
                 <span className="text-slate-600">Total CO₂ Avoided</span>
-                <span className="text-emerald-700 text-lg">{env.co2AvoidedKg} kg</span>
+                <span className="text-emerald-700 text-lg">{env.co2_avoided_kg} kg</span>
               </div>
             </div>
 

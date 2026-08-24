@@ -182,94 +182,8 @@ export default function OfficerPage() {
   const [manualSeverity, setManualSeverity] = useState<string>("DEFAULT");
   const [manualTruck, setManualTruck] = useState<string>("AUTO");
 
-  // Citizen Reports Database (linked to incidents by incidentId)
-  const [citizenReports, setCitizenReports] = useState<CitizenReportDetail[]>([
-    {
-      reportId: "REP-9482",
-      incidentId: "INC-8091",
-      reporterName: "Anita Sharma",
-      reporterPhone: "+91 98765 43210",
-      description: "Overflowing green bins near hospital main gate. Mixed waste including used masks, syringes visible, and plastic food packaging. Very foul smell. Patients and visitors are affected. This has been here for 2 days. Please clean urgently — this is a health hazard near the pediatric ward.",
-      address: "Sector 12 Civil Hospital Main Gate, Gandhinagar",
-      category: "Hazardous / Bio-Medical",
-      photos: ["/demo-report-1.jpg"],
-      submittedAt: "18 Aug 2026, 09:36 AM",
-      aiCategory: "Hazardous Bio-Medical Waste",
-      aiConfidence: 0.96,
-      aiSeverity: 9.2,
-      aiVolume: 3.4,
-      aiTags: ["bio_hazard", "medical_waste", "overflow_bin", "syringes", "masks"],
-      aiRecommendedAction: "IMMEDIATE: Dispatch Hazmat-certified Compactor. Notify hospital administration.",
-    },
-    {
-      reportId: "REP-9380",
-      incidentId: "INC-8091",
-      reporterName: "Rakesh Patel",
-      reporterPhone: "+91 99876 12340",
-      description: "More waste piling up near the hospital side entrance. Same issue as other reports. Medical waste packaging visible.",
-      address: "Sector 12 Civil Hospital Side Gate, Gandhinagar",
-      category: "Hazardous / Bio-Medical",
-      photos: ["/demo-report-1.jpg"],
-      submittedAt: "18 Aug 2026, 09:48 AM",
-      aiCategory: "Hazardous Bio-Medical Waste",
-      aiConfidence: 0.92,
-      aiSeverity: 8.8,
-      aiVolume: 2.1,
-      aiTags: ["bio_hazard", "medical_packaging", "overflow_bin"],
-      aiRecommendedAction: "Cluster with existing INC-8091. Escalate priority.",
-    },
-    {
-      reportId: "REP-9104",
-      incidentId: "INC-8042",
-      reporterName: "Meera Joshi",
-      reporterPhone: "+91 98712 56789",
-      description: "Huge pile of plastic bottles and packaging waste dumped next to the railway depot boundary wall. Looks like someone unloaded a truck of packaging waste here. Blocking the pedestrian path.",
-      address: "Gandhinagar Railway Depot, Platform Side",
-      category: "Plastic / Bottling",
-      photos: ["/demo-report-2.jpg"],
-      submittedAt: "18 Aug 2026, 08:50 AM",
-      aiCategory: "Plastic Packaging Waste",
-      aiConfidence: 0.94,
-      aiSeverity: 7.6,
-      aiVolume: 2.8,
-      aiTags: ["plastic_bottles", "packaging", "illegal_dumping", "pedestrian_hazard"],
-      aiRecommendedAction: "Dispatch 5-Tonne Compactor. Flag for illegal dumping investigation.",
-    },
-    {
-      reportId: "REP-8920",
-      incidentId: "INC-7994",
-      reporterName: "Suresh Desai",
-      reporterPhone: "+91 97654 32100",
-      description: "Rotting vegetable waste from the wholesale market spilling onto the road. Strong smell attracting stray animals. Market vendors also dumping water from fish stalls.",
-      address: "APMC Wholesale Yard, Gate 3, Sector 21",
-      category: "Organic / Food",
-      photos: ["/demo-report-2.jpg"],
-      submittedAt: "18 Aug 2026, 08:00 AM",
-      aiCategory: "Organic Food Waste",
-      aiConfidence: 0.91,
-      aiSeverity: 6.8,
-      aiVolume: 4.2,
-      aiTags: ["organic_waste", "food_waste", "market_spill", "stray_animals"],
-      aiRecommendedAction: "Dispatch Tipper truck. Schedule daily pre-market cleanup.",
-    },
-    {
-      reportId: "REP-8850",
-      incidentId: "INC-7920",
-      reporterName: "Kiran Thakor",
-      reporterPhone: "+91 98890 11223",
-      description: "Construction rubble and broken concrete blocks dumped on service road shoulder. Partly blocking traffic flow for two-wheelers.",
-      address: "Service Road near Zone 2 Central Depot",
-      category: "Construction Debris",
-      photos: ["/demo-report-1.jpg"],
-      submittedAt: "18 Aug 2026, 06:15 AM",
-      aiCategory: "Construction & Demolition Waste",
-      aiConfidence: 0.88,
-      aiSeverity: 5.4,
-      aiVolume: 6.0,
-      aiTags: ["construction_debris", "concrete", "road_hazard", "illegal_dumping"],
-      aiRecommendedAction: "Dispatch Heavy Tipper. Fine construction contractor if identifiable.",
-    },
-  ]);
+  // Citizen Reports Database (loaded dynamically from GET /api/v1/reports)
+  const [citizenReports, setCitizenReports] = useState<CitizenReportDetail[]>([]);
 
   // New Vehicle Form State
   const [newVehiclePlate, setNewVehiclePlate] = useState("");
@@ -285,7 +199,7 @@ export default function OfficerPage() {
   const [newDriverZone, setNewDriverZone] = useState("Sector 21 APMC");
   const [newDriverTruck, setNewDriverTruck] = useState("");
 
-  // Registered Vehicles State
+  // Registered Vehicles State (loaded dynamically from GET /api/v1/vehicles)
   const [vehicles, setVehicles] = useState<FleetVehicle[]>([
     {
       id: "VEH-01",
@@ -356,69 +270,16 @@ export default function OfficerPage() {
     },
   ]);
 
-  // Initial Route Polyline Coordinates (Truck -> Stop 1 -> Stop 2 -> Disposal Facility)
+  // Initial Route Polyline Coordinates
   const [routeCoordinates, setRouteCoordinates] = useState<Array<[number, number]>>([
-    [72.578, 23.025], // Truck position
-    [72.562, 23.018], // INC-8042 (P1)
-    [72.548, 23.045], // INC-7994 (P2)
-    [72.535, 23.060], // Waste Processing Plant
+    [72.578, 23.025],
+    [72.562, 23.018],
+    [72.548, 23.045],
+    [72.535, 23.060],
   ]);
 
-  // Realistic seed incidents with clustered report intelligence
-  const [incidents, setIncidents] = useState<IncidentItem[]>([
-    {
-      id: "INC-8091",
-      title: "Hazardous mixed waste at Sector 12 Civil Hospital Red Zone",
-      category: "Hazardous / Bio-Medical",
-      priority: "P0",
-      status: "REPORTED",
-      lat: 23.033,
-      lng: 72.586,
-      reportsCount: 8,
-      timeAgo: "24m ago",
-      slaMinutesLeft: 36,
-      sensitiveLocation: "Civil Hospital Buffer Zone (<200m)",
-    },
-    {
-      id: "INC-8042",
-      title: "Plastic packaging pile by Gandhinagar Railway Depot",
-      category: "Plastic / Bottling",
-      priority: "P1",
-      status: "ASSIGNED",
-      lat: 23.018,
-      lng: 72.562,
-      reportsCount: 4,
-      timeAgo: "1h 10m ago",
-      slaMinutesLeft: 110,
-      assignedTruck: "GJ-01-WM-4402 (Compactor)",
-    },
-    {
-      id: "INC-7994",
-      title: "Organic market waste spill at Sector 21",
-      category: "Organic / Food",
-      priority: "P2",
-      status: "IN_PROGRESS",
-      lat: 23.045,
-      lng: 72.548,
-      reportsCount: 3,
-      timeAgo: "2h ago",
-      slaMinutesLeft: 240,
-      assignedTruck: "GJ-01-WM-9120 (Tipper)",
-      sensitiveLocation: "APMC Wholesale Yard",
-    },
-    {
-      id: "INC-7920",
-      title: "Construction debris dumped on service road",
-      category: "Construction Debris",
-      priority: "P3",
-      status: "REPORTED",
-      lat: 23.008,
-      lng: 72.595,
-      reportsCount: 2,
-      timeAgo: "4h ago",
-      slaMinutesLeft: 480,
-    },
-  ]);
+  // Real incidents state (loaded from Supabase backend GET /api/v1/incidents)
+  const [incidents, setIncidents] = useState<IncidentItem[]>([]);
 
   const mapPoints: MapPoint[] = useMemo(() => {
     const points: MapPoint[] = incidents.map((inc) => ({
@@ -500,12 +361,9 @@ export default function OfficerPage() {
             };
           });
 
-          setIncidents(prev => {
-            // Merge with any simulated items or distinct IDs
-            const backendIds = new Set(mappedIncidents.map(i => i.id));
-            const retainedCustom = prev.filter(i => !backendIds.has(i.id) && i.id.startsWith("INC-P0"));
-            return [...mappedIncidents, ...retainedCustom];
-          });
+          setIncidents(mappedIncidents);
+        } else {
+          setIncidents([]);
         }
       }
 
@@ -532,15 +390,34 @@ export default function OfficerPage() {
             aiRecommendedAction: r.recommended_action || "Deploy municipal compactor vehicle",
           }));
 
-          setCitizenReports(prev => {
-            const reportIds = new Set(mappedReports.map(r => r.reportId));
-            const remaining = prev.filter(r => !reportIds.has(r.reportId));
-            return [...mappedReports, ...remaining];
-          });
+          setCitizenReports(mappedReports);
+        } else {
+          setCitizenReports([]);
+        }
+      }
+
+      // 3. Fetch Vehicles from Supabase DB
+      const resVehicles = await fetch(`${apiUrl}/api/v1/vehicles`);
+      if (resVehicles.ok) {
+        const vehData = await resVehicles.json();
+        if (Array.isArray(vehData) && vehData.length > 0) {
+          const mappedVehicles: FleetVehicle[] = vehData.map((v: { id: string; plate_number: string; vehicle_type: string; capacity_kg: number; current_load_kg?: number; status: FleetVehicle["status"]; current_lat?: number; current_lng?: number }) => ({
+            id: `VEH-${String(v.id).slice(0, 6).toUpperCase()}`,
+            plate: v.plate_number,
+            type: v.vehicle_type,
+            capacityKg: Number(v.capacity_kg),
+            currentLoadKg: Number(v.current_load_kg || 0),
+            status: v.status,
+            driver: "Assigned Driver",
+            lat: Number(v.current_lat || 23.025),
+            lng: Number(v.current_lng || 72.578),
+            zone: "Sector 12 Hospital Zone",
+          }));
+          setVehicles(mappedVehicles);
         }
       }
     } catch (e) {
-      console.warn("Could not connect to Supabase backend, using local state", e);
+      console.warn("Could not connect to Supabase backend", e);
     }
   }, []);
 
@@ -568,46 +445,14 @@ export default function OfficerPage() {
       console.warn("WebSocket init fallback", err);
     }
 
-    // 2. LocalStorage sync fallback
-    const loadSyncedData = () => {
-      try {
-        const syncedIncidents = JSON.parse(localStorage.getItem("sync_incidents") || "[]");
-        const syncedDetails = JSON.parse(localStorage.getItem("sync_report_details") || "[]");
-        
-        if (syncedIncidents.length > 0) {
-          setIncidents(prev => {
-            const existingIds = new Set(prev.map(p => p.id));
-            const newIncidents = (syncedIncidents as IncidentItem[]).filter((i) => !existingIds.has(i.id));
-            if (newIncidents.length === 0) return prev;
-            return [...newIncidents, ...prev];
-          });
-        }
-        
-        if (syncedDetails.length > 0) {
-          setCitizenReports(prev => {
-            const existingIds = new Set(prev.map(p => p.reportId));
-            const newDetails = (syncedDetails as CitizenReportDetail[]).filter((r) => !existingIds.has(r.reportId));
-            if (newDetails.length === 0) return prev;
-            return [...newDetails, ...prev];
-          });
-        }
-      } catch (e) {
-        console.error("Failed to load synced reports", e);
-      }
-    };
-
-    window.addEventListener("storage", loadSyncedData);
-    
     // Polling interval (every 4s) to keep dashboard synchronized with Supabase DB
     const interval = setInterval(() => {
       void fetchBackendData();
-      loadSyncedData();
     }, 4000);
 
     return () => {
       clearTimeout(initialTimer);
       if (ws) ws.close();
-      window.removeEventListener("storage", loadSyncedData);
       clearInterval(interval);
     };
   }, [fetchBackendData]);
@@ -1265,94 +1110,102 @@ export default function OfficerPage() {
 
           {/* Incidents Scrollable List */}
           <div className="flex-1 overflow-y-auto space-y-3 pr-1">
-            {filteredIncidents.map((inc, idx) => (
-              <div
-                key={`${inc.id}-${idx}`}
-                onClick={() => setSelectedIncident(inc)}
-                className={`p-3.5 rounded-xl border transition-all cursor-pointer ${
-                  selectedIncident?.id === inc.id
-                    ? "border-[var(--color-primary)] bg-[var(--color-primary-tint)]/30 ring-1 ring-[var(--color-primary)]"
-                    : "border-slate-200 hover:border-slate-300 bg-white"
-                }`}
-              >
-                <div className="flex items-center justify-between mb-1.5">
-                  <div className="flex items-center gap-1.5">
-                    <span
-                      className="text-[10px] font-bold px-2 py-0.5 rounded-full text-white"
-                      style={{
-                        backgroundColor:
-                          inc.priority === "P0"
-                            ? "var(--color-p0-emergency)"
-                            : inc.priority === "P1"
-                            ? "var(--color-p1-veryhigh)"
-                            : inc.priority === "P2"
-                            ? "var(--color-p2-high)"
-                            : "var(--color-p3-normal)",
-                      }}
-                    >
-                      {inc.priority}
-                    </span>
-                    <span className="font-mono text-xs font-bold text-slate-800">{inc.id}</span>
-                  </div>
-                  <span className="text-[11px] font-semibold text-slate-400">{inc.timeAgo}</span>
-                </div>
-
-                <h3 className="text-xs font-bold text-slate-900 line-clamp-1 mb-1">{inc.title}</h3>
-                
-                {/* Clustered Consensus Badge */}
-                <div className="flex flex-wrap items-center gap-1.5 mb-2">
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
-                    <Users className="w-3 h-3" />
-                    {inc.reportsCount} Citizen Reports Clustered
-                  </span>
-                  {inc.sensitiveLocation && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-red-50 text-red-800 border border-red-200">
-                      <AlertTriangle className="w-3 h-3" />
-                      {inc.sensitiveLocation}
-                    </span>
-                  )}
-                </div>
-
-                <div className="flex items-center justify-between pt-2 border-t border-slate-100/80">
-                  <div className="flex items-center gap-2">
-                    <div className="flex items-center gap-1 text-[11px] font-semibold text-slate-600">
-                      <Clock className="w-3.5 h-3.5 text-slate-400" />
-                      <span>SLA: {inc.slaMinutesLeft}m left</span>
-                    </div>
-                    {/* View Reports Button */}
-                    {getReportsForIncident(inc.id).length > 0 && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleViewReports(inc.id);
+            {filteredIncidents.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center p-6 text-center text-slate-400">
+                <CheckCircle2 className="w-8 h-8 text-emerald-600 mb-2" />
+                <p className="text-xs font-bold text-slate-700">No active incidents</p>
+                <p className="text-[11px] text-slate-500">All municipal zones currently clear</p>
+              </div>
+            ) : (
+              filteredIncidents.map((inc, idx) => (
+                <div
+                  key={`${inc.id}-${idx}`}
+                  onClick={() => setSelectedIncident(inc)}
+                  className={`p-3.5 rounded-xl border transition-all cursor-pointer ${
+                    selectedIncident?.id === inc.id
+                      ? "border-[var(--color-primary)] bg-[var(--color-primary-tint)]/30 ring-1 ring-[var(--color-primary)]"
+                      : "border-slate-200 hover:border-slate-300 bg-white"
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex items-center gap-1.5">
+                      <span
+                        className="text-[10px] font-bold px-2 py-0.5 rounded-full text-white"
+                        style={{
+                          backgroundColor:
+                            inc.priority === "P0"
+                              ? "var(--color-p0-emergency)"
+                              : inc.priority === "P1"
+                              ? "var(--color-p1-veryhigh)"
+                              : inc.priority === "P2"
+                              ? "var(--color-p2-high)"
+                              : "var(--color-p3-normal)",
                         }}
-                        className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 cursor-pointer transition-colors"
                       >
-                        <Eye className="w-3 h-3" />
-                        {getReportsForIncident(inc.id).length} Reports
-                      </button>
+                        {inc.priority}
+                      </span>
+                      <span className="font-mono text-xs font-bold text-slate-800">{inc.id}</span>
+                    </div>
+                    <span className="text-[11px] font-semibold text-slate-400">{inc.timeAgo}</span>
+                  </div>
+
+                  <h3 className="text-xs font-bold text-slate-900 line-clamp-1 mb-1">{inc.title}</h3>
+                  
+                  {/* Clustered Consensus Badge */}
+                  <div className="flex flex-wrap items-center gap-1.5 mb-2">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                      <Users className="w-3 h-3" />
+                      {inc.reportsCount} Citizen Reports Clustered
+                    </span>
+                    {inc.sensitiveLocation && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-red-50 text-red-800 border border-red-200">
+                        <AlertTriangle className="w-3 h-3" />
+                        {inc.sensitiveLocation}
+                      </span>
                     )}
                   </div>
 
-                  {inc.status === "REPORTED" ? (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDispatch(inc.id);
-                      }}
-                      className="px-2.5 py-1 rounded-md text-[11px] font-bold text-white shadow-sm hover:opacity-90 cursor-pointer"
-                      style={{ backgroundColor: "var(--color-primary)" }}
-                    >
-                      Auto-Assign Best Truck
-                    </button>
-                  ) : (
-                    <span className="text-[10px] font-bold text-teal-800 bg-teal-50 px-2 py-0.5 rounded border border-teal-200 truncate max-w-[150px]">
-                      {inc.assignedTruck || "Assigned"}
-                    </span>
-                  )}
+                  <div className="flex items-center justify-between pt-2 border-t border-slate-100/80">
+                    <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1 text-[11px] font-semibold text-slate-600">
+                        <Clock className="w-3.5 h-3.5 text-slate-400" />
+                        <span>SLA: {inc.slaMinutesLeft}m left</span>
+                      </div>
+                      {/* View Reports Button */}
+                      {getReportsForIncident(inc.id).length > 0 && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleViewReports(inc.id);
+                          }}
+                          className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 cursor-pointer transition-colors"
+                        >
+                          <Eye className="w-3 h-3" />
+                          {getReportsForIncident(inc.id).length} Reports
+                        </button>
+                      )}
+                    </div>
+
+                    {inc.status === "REPORTED" ? (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDispatch(inc.id);
+                        }}
+                        className="px-2.5 py-1 rounded-md text-[11px] font-bold text-white shadow-sm hover:opacity-90 cursor-pointer"
+                        style={{ backgroundColor: "var(--color-primary)" }}
+                      >
+                        Auto-Assign Best Truck
+                      </button>
+                    ) : (
+                      <span className="text-[10px] font-bold text-teal-800 bg-teal-50 px-2 py-0.5 rounded border border-teal-200 truncate max-w-[150px]">
+                        {inc.assignedTruck || "Assigned"}
+                      </span>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </div>
       </div>

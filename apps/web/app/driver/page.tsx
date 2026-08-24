@@ -31,6 +31,18 @@ interface DriverTask {
   status: "PENDING" | "EN_ROUTE" | "ARRIVED" | "COLLECTING" | "EVIDENCE_UPLOADED" | "COMPLETED";
 }
 
+interface BackendIncidentItem {
+  id: string;
+  title?: string;
+  category?: string;
+  priority?: "P0" | "P1" | "P2" | "P3" | "P4";
+  status?: string;
+  latitude: number;
+  longitude: number;
+  estimated_volume_m3?: number;
+  address_text?: string;
+}
+
 export default function DriverPage() {
   const [currentLoad, setCurrentLoad] = useState(2450);
   const maxCapacity = 5000;
@@ -41,52 +53,45 @@ export default function DriverPage() {
     notes: string[];
   } | null>(null);
 
-  const [tasks, setTasks] = useState<DriverTask[]>([
-    {
-      id: "TSK-P0",
-      incidentId: "INC-P0-9912",
-      title: "CRITICAL: Bio-hazard Spill near Pediatric Wing (Sector 12)",
-      address: "Civil Hospital Red Zone, Sector 12",
-      priority: "P0",
-      estimatedKg: 650,
-      etaMinutes: 4,
-      status: "EN_ROUTE",
-    },
-    {
-      id: "TSK-101",
-      incidentId: "INC-8091",
-      title: "Hazardous mixed waste (Sector 12)",
-      address: "Sector 12 Civil Hospital Red Zone",
-      priority: "P0",
-      estimatedKg: 850,
-      etaMinutes: 12,
-      status: "PENDING",
-    },
-    {
-      id: "TSK-102",
-      incidentId: "INC-8042",
-      title: "Plastic packaging pile by Railway Depot",
-      address: "Central Bus Depot, Zone 2",
-      priority: "P1",
-      estimatedKg: 420,
-      etaMinutes: 26,
-      status: "PENDING",
-    },
-    {
-      id: "TSK-103",
-      incidentId: "INC-7994",
-      title: "Organic market waste spill",
-      address: "Sector 21 Vegetable Yard",
-      priority: "P2",
-      estimatedKg: 600,
-      etaMinutes: 48,
-      status: "PENDING",
-    },
-  ]);
+  const [tasks, setTasks] = useState<DriverTask[]>([]);
+
+  // Fetch real incidents from Supabase backend
+  React.useEffect(() => {
+    const fetchDriverTasks = async () => {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      try {
+        const res = await fetch(`${apiUrl}/api/v1/incidents`);
+        if (res.ok) {
+          const data: BackendIncidentItem[] = await res.json();
+          if (Array.isArray(data) && data.length > 0) {
+            const mapped: DriverTask[] = data.map((inc: BackendIncidentItem, idx: number) => ({
+              id: `TSK-${String(inc.id).slice(0, 6).toUpperCase()}`,
+              incidentId: `WW-${String(inc.id).slice(0, 8).toUpperCase()}`,
+              title: inc.title || `${(inc.category || "Mixed").toUpperCase()} at ${inc.address_text || "Gandhinagar"}`,
+              address: inc.address_text || `GPS: ${inc.latitude?.toFixed(4)}°N, ${inc.longitude?.toFixed(4)}°E`,
+              priority: (inc.priority as DriverTask["priority"]) || "P3",
+              estimatedKg: Math.round((inc.estimated_volume_m3 || 1.5) * 400),
+              etaMinutes: (idx + 1) * 8,
+              status: inc.status === "ASSIGNED" ? (idx === 0 ? "EN_ROUTE" : "PENDING") : inc.status === "COLLECTED" ? "COMPLETED" : "PENDING",
+            }));
+            setTasks(mapped);
+          }
+        }
+      } catch (err) {
+        console.warn("Could not fetch driver incidents, fallback to default", err);
+      }
+    };
+
+    const timer = setTimeout(() => {
+      void fetchDriverTasks();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, []);
 
   const activeTask = tasks.find((t) => t.status !== "COMPLETED") || tasks[0];
 
-  const updateTaskStatus = (newStatus: DriverTask["status"]) => {
+  const updateTaskStatus = async (newStatus: DriverTask["status"]) => {
+    if (!activeTask) return;
     setTasks((prev) =>
       prev.map((t) =>
         t.id === activeTask.id
@@ -101,6 +106,17 @@ export default function DriverPage() {
     if (newStatus === "COMPLETED") {
       setCurrentLoad((prev) => Math.min(maxCapacity, prev + activeTask.estimatedKg));
     }
+
+    // Persist status change to Supabase backend
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const dbStatus = newStatus === "COMPLETED" ? "COLLECTED" : newStatus === "COLLECTING" || newStatus === "ARRIVED" ? "IN_PROGRESS" : "ASSIGNED";
+      await fetch(`${apiUrl}/api/v1/incidents/${activeTask.incidentId.replace("WW-", "")}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: dbStatus }),
+      });
+    } catch {}
   };
 
   const mounted = React.useSyncExternalStore(
@@ -186,8 +202,14 @@ export default function DriverPage() {
         </div>
       </div>
 
-      {/* Active Assignment Card */}
-      {activeTask && (
+      {/* Active Assignment Card or Empty State */}
+      {!activeTask ? (
+        <div className="bg-white rounded-2xl p-8 border border-slate-200 shadow-sm mb-6 text-center">
+          <CheckCircle className="w-8 h-8 text-emerald-600 mx-auto mb-2" />
+          <h3 className="text-sm font-bold text-slate-800">No Pending Driver Tasks</h3>
+          <p className="text-xs text-slate-500 mt-1">Vehicle GJ-01-WM-4402 is on standby. All assigned pickups are clear.</p>
+        </div>
+      ) : (
         <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-md mb-6 relative overflow-hidden">
           <div className="flex items-center justify-between mb-2">
             <span

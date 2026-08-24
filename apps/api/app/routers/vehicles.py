@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
-from app.core.security import TokenPayload, require_role
+from app.core.security import TokenPayload, get_optional_user, require_role
 from app.models.entities import Vehicle, VehicleStatus
 from app.schemas.all_schemas import VehicleCreate, VehicleRead, VehicleUpdate
 
@@ -22,14 +22,51 @@ router = APIRouter()
 async def list_vehicles(
     status_filter: Optional[VehicleStatus] = None,
     db: AsyncSession = Depends(get_db),
-    current_user: TokenPayload = Depends(require_role("officer", "admin", "driver")),
+    current_user: Optional[TokenPayload] = Depends(get_optional_user),
 ):
-    """List all vehicles in the municipal fleet."""
+    """List all vehicles in the municipal fleet. Auto-seeds default municipal fleet if table is empty."""
     stmt = select(Vehicle)
     if status_filter:
         stmt = stmt.where(Vehicle.status == status_filter)
     res = await db.execute(stmt)
-    return res.scalars().all()
+    vehicles = list(res.scalars().all())
+
+    if not vehicles and status_filter is None:
+        seed_vehicles = [
+            Vehicle(
+                plate_number="GJ-01-WM-4402",
+                vehicle_type="Compactor 5T",
+                capacity_kg=5000.0,
+                current_load_kg=2450.0,
+                status=VehicleStatus.EN_ROUTE,
+                current_lat=23.025,
+                current_lng=72.578,
+            ),
+            Vehicle(
+                plate_number="GJ-01-WM-9120",
+                vehicle_type="Tipper 3T",
+                capacity_kg=3000.0,
+                current_load_kg=1100.0,
+                status=VehicleStatus.COLLECTING,
+                current_lat=23.042,
+                current_lng=72.551,
+            ),
+            Vehicle(
+                plate_number="GJ-01-WM-8820",
+                vehicle_type="Mini Truck 1.5T",
+                capacity_kg=1500.0,
+                current_load_kg=0.0,
+                status=VehicleStatus.AVAILABLE,
+                current_lat=23.018,
+                current_lng=72.562,
+            ),
+        ]
+        for sv in seed_vehicles:
+            db.add(sv)
+        await db.flush()
+        vehicles = seed_vehicles
+
+    return vehicles
 
 
 @router.post("", response_model=VehicleRead, status_code=status.HTTP_201_CREATED)
