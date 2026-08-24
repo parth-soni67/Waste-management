@@ -9,7 +9,6 @@ import {
   ArrowLeft,
   Camera,
   MapPin,
-  ChevronRight,
   ShieldCheck,
   ImagePlus,
   LogOut,
@@ -19,20 +18,21 @@ import {
   Upload,
   Check,
   CheckCircle2,
+  Layers,
 } from "lucide-react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useAuth } from "@/lib/auth-context";
-import { formatRelativeTime } from "@/app/lib/timeAgo";
 import type { DriverMapIncident } from "./DriverMap";
 import CameraCaptureModal from "./CameraCaptureModal";
 
-// Dynamically import Map component to avoid SSR window errors
+// Dynamically import MapLibre Component (disable SSR)
 const DriverMap = dynamic(() => import("./DriverMap"), {
   ssr: false,
   loading: () => (
-    <div className="w-full h-full min-h-[420px] rounded-2xl bg-slate-100 animate-pulse flex items-center justify-center text-slate-400 text-xs font-semibold">
-      Loading Live Municipal Navigation Map...
+    <div className="w-full h-full min-h-[440px] bg-slate-900/90 rounded-2xl flex flex-col items-center justify-center text-slate-400 gap-3 border border-slate-800">
+      <div className="w-8 h-8 border-3 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+      <span className="text-xs font-semibold text-slate-300">Initializing Live Navigation Map...</span>
     </div>
   ),
 });
@@ -46,6 +46,9 @@ export interface DriverAssignment {
   category: string;
   severity_score?: number;
   estimated_volume_m3?: number;
+  volume_source?: string;
+  volume_confidence?: number;
+  report_count?: number;
   latitude: number;
   longitude: number;
   address?: string;
@@ -58,8 +61,10 @@ export interface DriverAssignment {
   vehicle_plate?: string;
   vehicle_capacity_kg?: number;
   vehicle_current_load_kg?: number;
-  citizen_image_urls: string[];
-  proof_image_urls: string[];
+  primary_image_urls?: string[];
+  cluster_image_urls?: string[];
+  citizen_image_urls?: string[];
+  proof_image_urls?: string[];
 }
 
 export interface CollectionProofItem {
@@ -69,6 +74,7 @@ export interface CollectionProofItem {
   storage_path: string;
   latitude?: number;
   longitude?: number;
+  distance_meters?: number;
   uploaded_at: string;
   verification_status: string;
 }
@@ -79,17 +85,36 @@ function computeHaversineDistance(
   lat2: number,
   lon2: number
 ): number {
-  const R = 6371e3; // meters
-  const φ1 = (lat1 * Math.PI) / 180;
-  const φ2 = (lat2 * Math.PI) / 180;
-  const Δφ = ((lat2 - lat1) * Math.PI) / 180;
-  const Δλ = ((lon2 - lon1) * Math.PI) / 180;
+  const R = 6371e3; // Earth radius in meters
+  const phi1 = (lat1 * Math.PI) / 180;
+  const phi2 = (lat2 * Math.PI) / 180;
+  const deltaPhi = ((lat2 - lat1) * Math.PI) / 180;
+  const deltaLambda = ((lon2 - lon1) * Math.PI) / 180;
 
   const a =
-    Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-    Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+    Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2) +
+    Math.cos(phi1) * Math.cos(phi2) * Math.sin(deltaLambda / 2) * Math.sin(deltaLambda / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c; // in meters
+}
+
+function formatDistanceDisplay(meters: number | null): string {
+  if (meters === null || isNaN(meters)) return "Calculating...";
+  if (meters < 1000) {
+    return `${Math.round(meters)} m`;
+  }
+  return `${(meters / 1000).toFixed(2)} km`;
+}
+
+function formatEtaDisplay(minutes: number | null): string {
+  if (minutes === null || isNaN(minutes)) return "Calculating...";
+  if (minutes < 1) return "< 1 min";
+  if (minutes >= 60) {
+    const hrs = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    return `${hrs}h ${mins}m`;
+  }
+  return `${minutes} min`;
 }
 
 export default function DriverPage() {
@@ -100,18 +125,16 @@ export default function DriverPage() {
   const [activeIncidentId, setActiveIncidentId] = useState<string | null>(null);
   const [isFetching, setIsFetching] = useState<boolean>(false);
 
-  // Driver GPS Location (Defaults to Gandhinagar Central Depot)
-  const [driverLocation, setDriverLocation] = useState<{ lat: number; lng: number }>({
-    lat: 23.033,
-    lng: 72.586,
-  });
+  // Driver GPS Location
+  const [driverLocation, setDriverLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [locationAccuracy, setLocationAccuracy] = useState<number | null>(null);
+  const [isGpsAcquiring, setIsGpsAcquiring] = useState<boolean>(true);
   const lastSyncedLocRef = useRef<{ lat: number; lng: number } | null>(null);
 
   // Route & Navigation
   const [routeGeometry, setRouteGeometry] = useState<[number, number][]>([]);
-  const [distanceKm, setDistanceKm] = useState<number>(0);
-  const [etaMinutes, setEtaMinutes] = useState<number>(0);
+  const [distanceMeters, setDistanceMeters] = useState<number | null>(null);
+  const [etaMinutes, setEtaMinutes] = useState<number | null>(null);
   const [routeError, setRouteError] = useState<boolean>(false);
 
   // Proof of Work & Camera Modal
@@ -150,7 +173,7 @@ export default function DriverPage() {
         setAssignments(data);
 
         if (data.length > 0) {
-          // Keep active incident or default to first in sequence
+          // Keep active incident or default to first pending in sequence
           setActiveIncidentId((prev) => {
             if (prev && data.some((d) => d.incident_id === prev && d.status !== "COLLECTED")) {
               return prev;
@@ -187,10 +210,35 @@ export default function DriverPage() {
     }
   }, [user, fetchAssignments]);
 
-  // 2. Real-Time Geolocation Tracking (watchPosition)
-  useEffect(() => {
+  // 2. Real-Time Geolocation Tracking (watchPosition + single lock)
+  const refreshGpsLocation = useCallback(() => {
     if (typeof window === "undefined" || !("geolocation" in navigator)) {
+      setIsGpsAcquiring(false);
       return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const { latitude, longitude, accuracy } = pos.coords;
+        setDriverLocation({ lat: latitude, lng: longitude });
+        setLocationAccuracy(accuracy);
+        setIsGpsAcquiring(false);
+      },
+      (err) => {
+        console.warn("GPS acquire note:", err.message);
+        setIsGpsAcquiring(false);
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+  }, []);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      refreshGpsLocation();
+    }, 0);
+
+    if (typeof window === "undefined" || !("geolocation" in navigator)) {
+      return () => clearTimeout(timer);
     }
 
     const watchId = navigator.geolocation.watchPosition(
@@ -199,6 +247,7 @@ export default function DriverPage() {
         const newLoc = { lat: latitude, lng: longitude };
         setDriverLocation(newLoc);
         setLocationAccuracy(accuracy);
+        setIsGpsAcquiring(false);
 
         // Throttled sync to backend every ~10s or 50m change
         const lastSync = lastSyncedLocRef.current;
@@ -226,19 +275,23 @@ export default function DriverPage() {
       },
       (err) => {
         console.warn("Geolocation watch info", err);
+        setIsGpsAcquiring(false);
       },
       { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 }
     );
 
-    return () => navigator.geolocation.clearWatch(watchId);
-  }, [apiUrl, getAuthHeaders]);
+    return () => {
+      clearTimeout(timer);
+      navigator.geolocation.clearWatch(watchId);
+    };
+  }, [apiUrl, getAuthHeaders, refreshGpsLocation]);
 
   // 3. Real Road Route Calculation (Mapbox / OSRM)
   const computeRoute = useCallback(async () => {
     if (assignments.length === 0) {
       setRouteGeometry([]);
-      setDistanceKm(0);
-      setEtaMinutes(0);
+      setDistanceMeters(null);
+      setEtaMinutes(null);
       setRouteError(false);
       return;
     }
@@ -246,15 +299,20 @@ export default function DriverPage() {
     const activeInc = assignments.find((a) => a.incident_id === activeIncidentId) || assignments[0];
     if (!activeInc) return;
 
+    if (!driverLocation) {
+      setRouteGeometry([]);
+      setDistanceMeters(null);
+      setEtaMinutes(null);
+      setRouteError(false);
+      return;
+    }
+
     const startLng = driverLocation.lng;
     const startLat = driverLocation.lat;
     const endLng = activeInc.longitude;
     const endLat = activeInc.latitude;
 
-    const directDistKm = Number(
-      (computeHaversineDistance(startLat, startLng, endLat, endLng) / 1000.0).toFixed(1)
-    );
-
+    const directDistM = computeHaversineDistance(startLat, startLng, endLat, endLng);
     const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
 
     // Try Mapbox Directions API if configured
@@ -267,7 +325,7 @@ export default function DriverPage() {
           if (data.routes && data.routes.length > 0) {
             const route = data.routes[0];
             setRouteGeometry(route.geometry.coordinates as [number, number][]);
-            setDistanceKm(Number((route.distance / 1000.0).toFixed(1)));
+            setDistanceMeters(Math.round(route.distance));
             setEtaMinutes(Math.max(1, Math.round(route.duration / 60.0)));
             setRouteError(false);
             return;
@@ -285,7 +343,7 @@ export default function DriverPage() {
         if (data.routes && data.routes.length > 0) {
           const route = data.routes[0];
           setRouteGeometry(route.geometry.coordinates as [number, number][]);
-          setDistanceKm(Number((route.distance / 1000.0).toFixed(1)));
+          setDistanceMeters(Math.round(route.distance));
           setEtaMinutes(Math.max(1, Math.round(route.duration / 60.0)));
           setRouteError(false);
           return;
@@ -295,8 +353,8 @@ export default function DriverPage() {
 
     // Fallback to direct geometric bearing
     setRouteGeometry([[startLng, startLat], [endLng, endLat]]);
-    setDistanceKm(directDistKm);
-    setEtaMinutes(Math.max(1, Math.round((directDistKm / 25.0) * 60.0))); // ~25 km/h urban speed
+    setDistanceMeters(Math.round(directDistM));
+    setEtaMinutes(Math.max(1, Math.round((directDistM / 1000.0 / 25.0) * 60.0))); // ~25 km/h urban speed
     setRouteError(true);
   }, [driverLocation, assignments, activeIncidentId]);
 
@@ -328,11 +386,21 @@ export default function DriverPage() {
               msg.type === "ROUTE_UPDATED" ||
               msg.type === "INCIDENT_COLLECTED" ||
               msg.type === "COLLECTION_PROOF_UPLOADED" ||
-              msg.type === "INCIDENT_PROOF_SUBMITTED"
+              msg.type === "INCIDENT_PROOF_SUBMITTED" ||
+              msg.type === "INCIDENT_VERIFIED" ||
+              msg.type === "INCIDENT_PROOF_REJECTED"
             ) {
               if (msg.type === "INCIDENT_ASSIGNED" || msg.type === "NEW_INCIDENT_ASSIGNED") {
                 setActionSuccess("🚨 New waste collection stop assigned by Municipal Officer!");
                 setTimeout(() => setActionSuccess(null), 5000);
+              } else if (msg.type === "INCIDENT_PROOF_REJECTED") {
+                setActionError(
+                  `⚠️ Proof rejected by Officer: ${msg.rejection_reason || "Area not fully cleared"}. Please retake and upload proof.`
+                );
+                setUploadedProof(null);
+              } else if (msg.type === "INCIDENT_VERIFIED") {
+                setActionSuccess("✅ Proof verified by Municipal Officer! Great job.");
+                setTimeout(() => setActionSuccess(null), 6000);
               }
               void fetchAssignments();
             }
@@ -351,201 +419,210 @@ export default function DriverPage() {
 
     connectWs();
 
-    // 4-second sync interval to guarantee persistent real-time accuracy with Supabase PostgreSQL
-    const syncInterval = setInterval(() => {
-      void fetchAssignments();
-    }, 4000);
-
     return () => {
       clearTimeout(reconnectTimeout);
-      clearInterval(syncInterval);
-      ws?.close();
+      if (ws) ws.close();
     };
   }, [apiUrl, fetchAssignments]);
 
-  // Active Assignment Object
-  const currentAssignment = assignments.find((a) => a.incident_id === activeIncidentId) || assignments[0];
+  // 5. Active Incident Details
+  const currentAssignment = assignments.find((a) => a.incident_id === activeIncidentId) || (assignments.length > 0 ? assignments[0] : null);
 
-  // Arrival Proximity & GPS Distance Check
-  const distanceToIncidentMeters = React.useMemo(() => {
-    if (!driverLocation || !currentAssignment) return null;
-    return Math.round(
-      computeHaversineDistance(
-        driverLocation.lat,
-        driverLocation.lng,
-        currentAssignment.latitude,
-        currentAssignment.longitude
-      )
-    );
-  }, [driverLocation, currentAssignment]);
+  // Calculate distance between driver and current incident
+  const distanceToIncidentMeters =
+    driverLocation && currentAssignment
+      ? Math.round(
+          computeHaversineDistance(
+            driverLocation.lat,
+            driverLocation.lng,
+            currentAssignment.latitude,
+            currentAssignment.longitude
+          )
+        )
+      : null;
 
   const isArrived = distanceToIncidentMeters !== null && distanceToIncidentMeters <= 150;
 
-  // 5. Actions: Start Collection
+  // 6. Action: Start Collection
   const handleStartCollection = async () => {
     if (!currentAssignment) return;
     setIsStartingCollection(true);
     setActionError(null);
-    setActionSuccess(null);
 
     try {
       const res = await fetch(`${apiUrl}/api/v1/incidents/${currentAssignment.incident_id}/start`, {
         method: "POST",
         headers: getAuthHeaders(),
       });
-      if (res.ok) {
-        setActionSuccess("Collection started! Capture and upload the after-cleaning proof photo.");
-        void fetchAssignments();
-      } else {
-        const errData = await res.json();
-        setActionError(errData.detail || "Failed to start collection.");
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Failed to start collection");
       }
-    } catch {
-      setActionError("Network error starting collection.");
+
+      setActionSuccess(`Collection started at Stop #${currentAssignment.sequence}. Clean the site and upload proof photo.`);
+      setTimeout(() => setActionSuccess(null), 6000);
+      await fetchAssignments();
+    } catch (err: unknown) {
+      setActionError(err instanceof Error ? err.message : "Failed to start collection");
     } finally {
       setIsStartingCollection(false);
     }
   };
 
-  // 6. Actions: Handle Photo Captured from Camera Modal
-  const handlePhotoCapturedFromModal = (file: File, previewUrl: string) => {
+  // 7. Action: Handle Camera Photo Captured from Modal
+  const handleCameraPhotoCaptured = (file: File, preview: string) => {
     setProofFile(file);
-    setProofPreviewUrl(previewUrl);
-    setActionError(null);
-    setActionSuccess("Photo captured with device camera. Ready to upload.");
+    if (proofPreviewUrl) {
+      URL.revokeObjectURL(proofPreviewUrl);
+    }
+    setProofPreviewUrl(preview);
+    setActionSuccess("Photo captured with device camera. Click 'Upload & Verify Proof' below.");
+    setTimeout(() => setActionSuccess(null), 5000);
   };
 
-  // 7. Actions: Select Photo from Device Filesystem
+  // 8. Action: Handle File Selected from Device Filesystem
   const handlePhotoSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
       setProofFile(file);
+      if (proofPreviewUrl) {
+        URL.revokeObjectURL(proofPreviewUrl);
+      }
       setProofPreviewUrl(URL.createObjectURL(file));
-      setActionError(null);
     }
   };
 
-  // 8. Actions: Upload Proof to Supabase Storage
+  // 9. Action: Upload Proof-of-Work to Supabase Storage
   const handleUploadProof = async () => {
-    if (!proofFile || !currentAssignment) return;
+    if (!currentAssignment || !proofFile) return;
     setIsUploadingProof(true);
     setActionError(null);
-    setActionSuccess(null);
-
-    const formData = new FormData();
-    formData.append("file", proofFile);
-    if (driverLocation) {
-      formData.append("latitude", String(driverLocation.lat));
-      formData.append("longitude", String(driverLocation.lng));
-      if (locationAccuracy) formData.append("accuracy", String(locationAccuracy));
-    }
-    formData.append("notes", `Verified municipal collection at ${currentAssignment.address || "site"}`);
 
     try {
+      const formData = new FormData();
+      formData.append("file", proofFile);
+      if (driverLocation) {
+        formData.append("latitude", driverLocation.lat.toString());
+        formData.append("longitude", driverLocation.lng.toString());
+      }
+      if (locationAccuracy) {
+        formData.append("accuracy", locationAccuracy.toString());
+      }
+      formData.append("notes", `Cleaned by driver. Plate: ${vehicleInfo.plate}`);
+
       const res = await fetch(`${apiUrl}/api/v1/incidents/${currentAssignment.incident_id}/proof`, {
         method: "POST",
-        headers: {
-          Authorization: getAuthHeaders().Authorization || "",
-        },
+        headers: getAuthHeaders(),
         body: formData,
       });
 
-      if (res.ok) {
-        const proofData: CollectionProofItem = await res.json();
-        setUploadedProof(proofData);
-        setActionSuccess("Proof photo uploaded to Supabase Storage! You can now mark this stop as Collected.");
-        void fetchAssignments();
-      } else {
-        const errData = await res.json();
-        setActionError(errData.detail || "Proof upload failed.");
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Failed to upload proof of work");
       }
-    } catch {
-      setActionError("Error uploading proof photo to Supabase Storage.");
+
+      const proofData: CollectionProofItem = await res.json();
+      setUploadedProof(proofData);
+      setActionSuccess("Proof photo uploaded and GPS verified! You may now complete this stop.");
+      await fetchAssignments();
+    } catch (err: unknown) {
+      setActionError(err instanceof Error ? err.message : "Proof upload failed");
     } finally {
       setIsUploadingProof(false);
     }
   };
 
-  // 9. Actions: Complete Collection (Mark as Collected)
+  // 10. Action: Mark Collection Complete
   const handleCompleteCollection = async () => {
     if (!currentAssignment) return;
+    if (!uploadedProof && (!currentAssignment.proof_image_urls || currentAssignment.proof_image_urls.length === 0)) {
+      setActionError("Proof-of-work photo is required before completing this stop.");
+      return;
+    }
     setIsCompletingCollection(true);
     setActionError(null);
-    setActionSuccess(null);
 
     try {
+      const bodyPayload = driverLocation
+        ? { latitude: driverLocation.lat, longitude: driverLocation.lng, notes: "Complete" }
+        : { notes: "Complete" };
+
       const res = await fetch(`${apiUrl}/api/v1/incidents/${currentAssignment.incident_id}/complete`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
           ...getAuthHeaders(),
         },
-        body: JSON.stringify({
-          latitude: driverLocation?.lat,
-          longitude: driverLocation?.lng,
-          notes: "Collected and verified by driver.",
-        }),
+        body: JSON.stringify(bodyPayload),
       });
 
-      if (res.ok) {
-        setActionSuccess(`Stop #${currentAssignment.sequence} (${currentAssignment.incident_code}) collected successfully!`);
-        setProofFile(null);
-        setProofPreviewUrl(null);
-        setUploadedProof(null);
-        void fetchAssignments();
-      } else {
-        const errData = await res.json();
-        setActionError(errData.detail || "Failed to mark as collected. Proof photo is mandatory.");
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Cannot complete collection without uploaded photo proof");
       }
-    } catch {
-      setActionError("Network error completing collection.");
+
+      setActionSuccess(`✅ Stop #${currentAssignment.sequence} (${currentAssignment.incident_code}) collected successfully!`);
+      setTimeout(() => setActionSuccess(null), 6000);
+
+      // Reset proof state for next stop
+      setProofFile(null);
+      if (proofPreviewUrl) URL.revokeObjectURL(proofPreviewUrl);
+      setProofPreviewUrl(null);
+      setUploadedProof(null);
+
+      await fetchAssignments();
+    } catch (err: unknown) {
+      setActionError(err instanceof Error ? err.message : "Completion failed");
     } finally {
       setIsCompletingCollection(false);
     }
   };
 
-  // Convert assignments for Map representation
-  const mapIncidents: DriverMapIncident[] = React.useMemo(() => {
-    return assignments.map((a) => ({
-      id: a.incident_id,
-      incidentCode: a.incident_code,
-      title: a.title,
-      address: a.address || "Gandhinagar Municipal Zone",
-      priority: a.priority,
-      category: a.category,
-      estimatedVolumeM3: a.estimated_volume_m3,
-      latitude: a.latitude,
-      longitude: a.longitude,
-      sequence: a.sequence,
-      status: a.status,
-    }));
-  }, [assignments]);
+  // Map Data Conversion
+  const mapIncidents: DriverMapIncident[] = assignments.map((a) => ({
+    id: a.incident_id,
+    incidentCode: a.incident_code,
+    title: a.title,
+    address: a.address || "Municipal Sector",
+    priority: a.priority,
+    category: a.category,
+    estimatedVolumeM3: a.estimated_volume_m3,
+    latitude: a.latitude,
+    longitude: a.longitude,
+    sequence: a.sequence,
+    status: a.status,
+  }));
 
-  // Auth Guard: Only Authenticated Drivers
+  // Render Gate: Loading
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center text-white">
-        <RefreshCw className="w-8 h-8 text-emerald-500 animate-spin" />
+      <div className="min-h-screen bg-[var(--color-canvas)] flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3 text-emerald-800">
+          <div className="w-8 h-8 border-3 border-emerald-700 border-t-transparent rounded-full animate-spin" />
+          <span className="text-xs font-bold uppercase tracking-wider">Loading Driver Cockpit...</span>
+        </div>
       </div>
     );
   }
 
-  if (!user || (user.role !== "driver" && user.role !== "DRIVER" && user.role !== "officer" && user.role !== "admin")) {
+  // Render Gate: Unauthenticated or Not Driver
+  if (!user || (user.role !== "driver" && user.role !== "officer" && user.role !== "admin")) {
     return (
-      <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-6">
-        <div className="bg-slate-900 border border-slate-800 p-8 rounded-3xl max-w-md w-full text-center space-y-4 shadow-2xl">
-          <div className="w-16 h-16 rounded-full bg-red-900/40 border border-red-500/40 flex items-center justify-center mx-auto text-red-400">
-            <Lock className="w-8 h-8" />
+      <div className="min-h-screen bg-[var(--color-canvas)] flex items-center justify-center p-4">
+        <div className="w-full max-w-md bg-white rounded-3xl p-8 border border-slate-200 shadow-xl text-center">
+          <div className="w-14 h-14 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center mx-auto mb-4 text-amber-700">
+            <Lock className="w-7 h-7" />
           </div>
-          <h1 className="text-xl font-bold text-white">Municipal Driver Access Required</h1>
-          <p className="text-xs text-slate-400">
-            Please log in with an authorized Municipal Driver credential to access vehicle telemetry and real-time dispatches.
+          <h1 className="text-lg font-bold text-slate-900 mb-2">Driver Authentication Required</h1>
+          <p className="text-xs text-slate-500 mb-6 leading-relaxed">
+            Please log in with an authorized Municipal Driver account to access vehicle navigation, route dispatches, and proof-of-work submission.
           </p>
           <Link
             href="/"
-            className="block w-full py-3 px-4 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white transition-colors"
+            className="inline-flex items-center justify-center gap-2 w-full py-3 px-4 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold transition-all shadow-md"
           >
-            Go to Platform Login
+            <ArrowLeft className="w-4 h-4" /> Return to Login
           </Link>
         </div>
       </div>
@@ -553,34 +630,29 @@ export default function DriverPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-100 text-slate-900 font-sans pb-12">
-      {/* Real Browser Camera Capture Modal */}
-      <CameraCaptureModal
-        isOpen={isCameraModalOpen}
-        onClose={() => setIsCameraModalOpen(false)}
-        onPhotoCaptured={handlePhotoCapturedFromModal}
-      />
-
-      {/* Header Bar */}
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-xs">
+    <div className="min-h-screen bg-slate-50 text-slate-900 pb-12">
+      {/* Top Cockpit Header */}
+      <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200 shadow-xs">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Link
               href="/"
-              className="p-2 rounded-xl text-slate-500 hover:bg-slate-100 hover:text-slate-900 transition-colors"
+              className="p-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 transition-colors"
+              title="Home"
             >
-              <ArrowLeft className="w-5 h-5" />
+              <ArrowLeft className="w-4 h-4" />
             </Link>
-            <div className="flex items-center gap-2">
-              <div className="w-9 h-9 rounded-xl bg-emerald-800 flex items-center justify-center text-white shadow-xs">
+
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-emerald-700 text-white flex items-center justify-center shadow-xs">
                 <Truck className="w-5 h-5" />
               </div>
               <div>
-                <h1 className="text-sm sm:text-base font-black text-slate-900 leading-none">
-                  WasteWise Cockpit
+                <h1 className="text-sm sm:text-base font-extrabold tracking-tight text-slate-900 leading-tight">
+                  Driver Cockpit
                 </h1>
-                <p className="text-[11px] text-slate-500 font-medium mt-0.5">
-                  Municipal Fleet Operations & Route Execution
+                <p className="text-[11px] font-medium text-slate-500">
+                  Municipal Fleet Operations & Route Navigation
                 </p>
               </div>
             </div>
@@ -594,12 +666,20 @@ export default function DriverPage() {
             </div>
 
             {/* GPS Telemetry Indicator */}
-            <div className="flex items-center gap-1.5 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-xl text-xs font-bold text-emerald-800">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              <span className="hidden md:inline">GPS Active</span>
-              <span className="font-mono text-[10px] text-emerald-600">
-                {driverLocation.lat.toFixed(3)}, {driverLocation.lng.toFixed(3)}
+            <div
+              onClick={refreshGpsLocation}
+              className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-xl text-xs font-semibold text-emerald-900 cursor-pointer hover:bg-emerald-100 transition-colors"
+              title="Click to refresh GPS fix"
+            >
+              <span className={`w-2 h-2 rounded-full ${driverLocation ? "bg-emerald-600 animate-pulse" : "bg-amber-500 animate-ping"}`} />
+              <span className="hidden md:inline">
+                {driverLocation ? "GPS Active" : isGpsAcquiring ? "Acquiring GPS..." : "GPS Standby"}
               </span>
+              {driverLocation && (
+                <span className="font-mono text-[10px] text-emerald-700 font-bold">
+                  {driverLocation.lat.toFixed(4)}°N, {driverLocation.lng.toFixed(4)}°E
+                </span>
+              )}
             </div>
 
             {/* Refresh Button */}
@@ -635,7 +715,7 @@ export default function DriverPage() {
             </div>
             <button
               onClick={() => setActionSuccess(null)}
-              className="text-emerald-700 hover:text-emerald-900 cursor-pointer"
+              className="text-emerald-700 hover:text-emerald-900 cursor-pointer font-bold px-2"
             >
               ✕
             </button>
@@ -650,7 +730,7 @@ export default function DriverPage() {
             </div>
             <button
               onClick={() => setActionError(null)}
-              className="text-red-700 hover:text-red-900 cursor-pointer"
+              className="text-red-700 hover:text-red-900 cursor-pointer font-bold px-2"
             >
               ✕
             </button>
@@ -693,17 +773,19 @@ export default function DriverPage() {
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
               GPS Proximity Status
             </span>
-            <span className={`text-xs sm:text-sm font-black flex items-center gap-1 ${isArrived ? "text-emerald-600" : "text-slate-700"}`}>
+            <span className={`text-xs sm:text-sm font-black flex items-center gap-1.5 ${isArrived ? "text-emerald-600" : "text-slate-700"}`}>
               {isArrived ? (
                 <>
-                  <CheckCircle2 className="w-3.5 h-3.5" /> Arrived (&lt;150m)
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" /> Arrived (&le;150m)
                 </>
               ) : distanceToIncidentMeters !== null ? (
                 <>
-                  <Navigation className="w-3.5 h-3.5 text-blue-600" /> {distanceToIncidentMeters}m to stop
+                  <Navigation className="w-3.5 h-3.5 text-blue-600" /> {formatDistanceDisplay(distanceToIncidentMeters)} to stop
                 </>
+              ) : isGpsAcquiring ? (
+                "Acquiring GPS..."
               ) : (
-                "Locating..."
+                "Waiting for GPS fix"
               )}
             </span>
           </div>
@@ -726,6 +808,75 @@ export default function DriverPage() {
                 />
               </div>
             </div>
+
+            {/* Sequence of Stops Carousel */}
+            {assignments.length > 0 && (
+              <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200 shadow-sm space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-black uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                    <Navigation className="w-3.5 h-3.5 text-emerald-600" />
+                    Optimized Collection Sequence
+                  </h3>
+                  <span className="text-[11px] font-bold text-slate-500">
+                    {assignments.length} {assignments.length === 1 ? "Stop" : "Stops"}
+                  </span>
+                </div>
+
+                <div className="flex gap-3 overflow-x-auto pb-2">
+                  {assignments.map((assignment) => {
+                    const isSelected = assignment.incident_id === activeIncidentId;
+                    const isCollected = assignment.status === "COLLECTED";
+
+                    return (
+                      <button
+                        key={assignment.incident_id}
+                        onClick={() => setActiveIncidentId(assignment.incident_id)}
+                        className={`shrink-0 w-52 p-3.5 rounded-2xl border text-left transition-all cursor-pointer ${
+                          isSelected
+                            ? "border-emerald-600 bg-emerald-50/50 shadow-sm ring-2 ring-emerald-500/20"
+                            : isCollected
+                            ? "border-slate-200 bg-slate-50/50 opacity-60"
+                            : "border-slate-200 bg-white hover:border-slate-300"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-2">
+                          <span
+                            className={`px-2 py-0.5 rounded-md text-[10px] font-black text-white ${
+                              assignment.priority === "P0"
+                                ? "bg-red-600"
+                                : assignment.priority === "P1"
+                                ? "bg-orange-600"
+                                : assignment.priority === "P2"
+                                ? "bg-amber-600"
+                                : "bg-blue-600"
+                            }`}
+                          >
+                            STOP #{assignment.sequence} • {assignment.priority}
+                          </span>
+
+                          {isCollected ? (
+                            <span className="text-[10px] font-bold text-emerald-700 flex items-center gap-0.5">
+                              <Check className="w-3 h-3" /> Done
+                            </span>
+                          ) : (
+                            <span className="text-[10px] font-mono text-slate-400">
+                              {assignment.incident_code}
+                            </span>
+                          )}
+                        </div>
+
+                        <h4 className="text-xs font-bold text-slate-900 line-clamp-1 mb-1">
+                          {assignment.title}
+                        </h4>
+                        <p className="text-[10px] text-slate-500 line-clamp-1">
+                          {assignment.address || "Municipal Sector"}
+                        </p>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Right Column (Active Stop Dispatch & Mandatory Proof Workflow) */}
@@ -807,42 +958,120 @@ export default function DriverPage() {
                 <div className="grid grid-cols-3 gap-2 bg-slate-50 p-3 rounded-2xl border border-slate-100 text-center">
                   <div>
                     <span className="text-[10px] font-semibold text-slate-400 block">Distance</span>
-                    <span className="text-sm font-black text-slate-800">{distanceKm} km</span>
+                    <span className="text-xs sm:text-sm font-black text-slate-800">
+                      {distanceMeters !== null ? formatDistanceDisplay(distanceMeters) : "Acquiring..."}
+                    </span>
                   </div>
                   <div>
                     <span className="text-[10px] font-semibold text-slate-400 block">ETA</span>
-                    <span className="text-sm font-black text-emerald-700">{etaMinutes} min</span>
+                    <span className="text-xs sm:text-sm font-black text-emerald-700">
+                      {etaMinutes !== null ? formatEtaDisplay(etaMinutes) : "Calculating..."}
+                    </span>
                   </div>
                   <div>
                     <span className="text-[10px] font-semibold text-slate-400 block">Est. Volume</span>
-                    <span className="text-sm font-black text-slate-800">
-                      {currentAssignment.estimated_volume_m3 || 1.2} m³
+                    <span className="text-xs sm:text-sm font-black text-slate-800">
+                      {currentAssignment.estimated_volume_m3 !== undefined
+                        ? Number(currentAssignment.estimated_volume_m3).toFixed(2)
+                        : "1.50"}{" "}
+                      m³
                     </span>
                   </div>
                 </div>
 
-                {/* Citizen Uploaded Image Preview (BEFORE Photo) */}
-                {currentAssignment.citizen_image_urls && currentAssignment.citizen_image_urls.length > 0 && (
-                  <div className="p-3 rounded-2xl bg-amber-50/70 border border-amber-200/80">
-                    <span className="text-[10px] font-extrabold text-amber-800 uppercase tracking-wider block mb-1.5">
-                      Citizen Reported Scene (Before Cleaning)
-                    </span>
-                    <div className="flex gap-2 overflow-x-auto">
-                      {currentAssignment.citizen_image_urls.map((url, i) => (
+                {/* Volume Sourcing Badge */}
+                <div className="flex items-center justify-between text-[11px] bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200">
+                  <span className="text-slate-500 font-medium">Volume Calculation:</span>
+                  <span className="font-bold text-slate-800 flex items-center gap-1">
+                    <Layers className="w-3 h-3 text-emerald-600" />
+                    {currentAssignment.volume_source === "CLUSTER_AGGREGATE"
+                      ? `Cluster Aggregated (${currentAssignment.report_count || 1} reports)`
+                      : "AI Vision Estimate"}
+                  </span>
+                </div>
+
+                {/* Primary Citizen Report Photo(s) */}
+                {currentAssignment.primary_image_urls && currentAssignment.primary_image_urls.length > 0 && (
+                  <div className="p-3.5 rounded-2xl bg-amber-50/80 border border-amber-200/90 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-extrabold text-amber-900 uppercase tracking-wider flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-amber-500" />
+                        Primary Citizen Report — {currentAssignment.primary_image_urls.length} Photo{currentAssignment.primary_image_urls.length > 1 ? "s" : ""}
+                      </span>
+                      <span className="text-[10px] font-bold bg-amber-200/70 text-amber-900 px-2 py-0.5 rounded-full">
+                        Direct Evidence
+                      </span>
+                    </div>
+                    <div className="flex gap-2.5 overflow-x-auto pb-1">
+                      {currentAssignment.primary_image_urls.map((url, i) => (
                         <a
-                          key={i}
+                          key={`prim-${i}`}
                           href={url}
                           target="_blank"
                           rel="noreferrer"
-                          className="block relative w-16 h-16 rounded-xl overflow-hidden border border-amber-200 shrink-0"
+                          className="block relative w-20 h-20 rounded-xl overflow-hidden border-2 border-amber-300 shrink-0 shadow-xs hover:opacity-90 transition-opacity"
                         >
                           {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={url} alt="Citizen report" className="w-full h-full object-cover" />
+                          <img src={url} alt="Primary citizen report" className="w-full h-full object-cover" />
                         </a>
                       ))}
                     </div>
                   </div>
                 )}
+
+                {/* Clustered Reports Evidence (if multiple citizen reports merged) */}
+                {currentAssignment.cluster_image_urls && currentAssignment.cluster_image_urls.length > 0 && (
+                  <div className="p-3.5 rounded-2xl bg-blue-50/80 border border-blue-200/90 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-extrabold text-blue-900 uppercase tracking-wider flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-blue-500" />
+                        Cluster Evidence — {currentAssignment.cluster_image_urls.length} Photo{currentAssignment.cluster_image_urls.length > 1 ? "s" : ""}
+                      </span>
+                      <span className="text-[10px] font-bold bg-blue-200/70 text-blue-900 px-2 py-0.5 rounded-full">
+                        {currentAssignment.report_count ? `${currentAssignment.report_count} Clustered Reports` : "Nearby Reports"}
+                      </span>
+                    </div>
+                    <div className="flex gap-2.5 overflow-x-auto pb-1">
+                      {currentAssignment.cluster_image_urls.map((url, i) => (
+                        <a
+                          key={`clust-${i}`}
+                          href={url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="block relative w-20 h-20 rounded-xl overflow-hidden border-2 border-blue-300 shrink-0 shadow-xs hover:opacity-90 transition-opacity"
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={url} alt="Clustered report evidence" className="w-full h-full object-cover" />
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Fallback Citizen Image Preview if legacy incident */}
+                {(!currentAssignment.primary_image_urls || currentAssignment.primary_image_urls.length === 0) &&
+                  currentAssignment.citizen_image_urls &&
+                  currentAssignment.citizen_image_urls.length > 0 && (
+                    <div className="p-3 rounded-2xl bg-amber-50/70 border border-amber-200/80">
+                      <span className="text-[10px] font-extrabold text-amber-800 uppercase tracking-wider block mb-1.5">
+                        Citizen Reported Scene (Before Cleaning)
+                      </span>
+                      <div className="flex gap-2 overflow-x-auto">
+                        {currentAssignment.citizen_image_urls.map((url, i) => (
+                          <a
+                            key={i}
+                            href={url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="block relative w-16 h-16 rounded-xl overflow-hidden border border-amber-200 shrink-0"
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={url} alt="Citizen report" className="w-full h-full object-cover" />
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                 {/* Collection Workflow Stepper */}
                 <div className="pt-2 border-t border-slate-100 space-y-3">
@@ -918,136 +1147,86 @@ export default function DriverPage() {
                             <span className="font-semibold text-slate-600">Proof Location Proximity:</span>
                             {distanceToIncidentMeters !== null && distanceToIncidentMeters <= 250 ? (
                               <span className="font-bold text-emerald-700 flex items-center gap-1">
-                                <CheckCircle2 className="w-3.5 h-3.5" /> GPS Verified ({distanceToIncidentMeters}m)
+                                <CheckCircle2 className="w-3.5 h-3.5" /> GPS Verified ({formatDistanceDisplay(distanceToIncidentMeters)})
                               </span>
                             ) : distanceToIncidentMeters !== null ? (
                               <span className="font-bold text-amber-700 flex items-center gap-1">
-                                <AlertTriangle className="w-3.5 h-3.5" /> Distance: {distanceToIncidentMeters}m
+                                <AlertTriangle className="w-3.5 h-3.5" /> {formatDistanceDisplay(distanceToIncidentMeters)} from incident
                               </span>
                             ) : (
-                              <span className="text-slate-400">GPS Attached</span>
+                              <span className="text-slate-500">Acquiring GPS fix...</span>
                             )}
                           </div>
 
-                          {!uploadedProof && (
-                            <button
-                              onClick={handleUploadProof}
-                              disabled={isUploadingProof}
-                              className="w-full py-2.5 px-4 rounded-xl text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-                            >
-                              <Upload className="w-3.5 h-3.5" />
-                              <span>{isUploadingProof ? "Uploading to Supabase..." : "Upload Proof to Supabase"}</span>
-                            </button>
-                          )}
+                          <button
+                            type="button"
+                            onClick={handleUploadProof}
+                            disabled={isUploadingProof}
+                            className="w-full py-2.5 px-4 rounded-xl text-xs font-extrabold text-white bg-slate-900 hover:bg-slate-800 transition-colors flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                          >
+                            <Upload className="w-4 h-4" />
+                            <span>{isUploadingProof ? "Uploading & Verifying..." : "Upload & Verify Proof Photo"}</span>
+                          </button>
                         </div>
                       )}
 
-                      {/* Uploaded Confirmation */}
-                      {(uploadedProof || (currentAssignment.proof_image_urls && currentAssignment.proof_image_urls.length > 0)) && (
-                        <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-bold flex items-center gap-2">
-                          <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-                          <span>Proof Verified & Stored in Supabase Storage</span>
+                      {/* Display Existing Uploaded Proof */}
+                      {uploadedProof && (
+                        <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-xs flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+                            <div>
+                              <span className="font-bold text-emerald-950 block">Proof Uploaded & Stored</span>
+                              <span className="text-[10px] text-emerald-700">Status: {uploadedProof.verification_status}</span>
+                            </div>
+                          </div>
+                          <a
+                            href={uploadedProof.image_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-[11px] font-bold text-emerald-800 underline"
+                          >
+                            View
+                          </a>
                         </div>
                       )}
 
-                      {/* Step 4: Final Complete Button */}
+                      {/* Step 3: Complete Collection Button (Enabled only if proof uploaded) */}
                       <button
                         onClick={handleCompleteCollection}
-                        disabled={
-                          isCompletingCollection ||
-                          (!uploadedProof && (!currentAssignment.proof_image_urls || currentAssignment.proof_image_urls.length === 0))
-                        }
-                        className="w-full py-3 px-4 rounded-2xl text-xs font-black text-white bg-emerald-700 hover:bg-emerald-800 shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                        disabled={isCompletingCollection || !uploadedProof}
+                        className="w-full py-3 px-4 rounded-2xl text-xs font-black text-white bg-emerald-600 hover:bg-emerald-700 shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                       >
-                        <CheckCircle className="w-4 h-4" />
-                        <span>
-                          {isCompletingCollection
-                            ? "Completing Collection..."
-                            : "MARK AS COLLECTED & NEXT STOP"}
-                        </span>
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>{isCompletingCollection ? "Submitting..." : "MARK COLLECTED & PROCEED TO NEXT STOP"}</span>
                       </button>
                     </div>
                   )}
 
-                  {/* Completed Badge */}
+                  {/* Completed State */}
                   {currentAssignment.status === "COLLECTED" && (
-                    <div className="p-3 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-bold text-center">
-                      ✓ This stop was completed and verified.
+                    <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-center">
+                      <span className="text-xs font-extrabold text-emerald-800 flex items-center justify-center gap-1 mb-0.5">
+                        <CheckCircle className="w-4 h-4 text-emerald-600" /> Collection Complete
+                      </span>
+                      <p className="text-[11px] text-emerald-600">
+                        Waste collected and verified. Select next stop on map.
+                      </p>
                     </div>
                   )}
-                </div>
-              </div>
-            )}
-
-            {/* Stop Sequence Drawer / List */}
-            {assignments.length > 0 && (
-              <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-xs space-y-3">
-                <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-                  <span className="text-xs font-extrabold text-slate-800">
-                    Optimized Route Stop Sequence
-                  </span>
-                  <span className="text-[10px] font-bold text-slate-400">
-                    {assignments.filter((a) => a.status === "COLLECTED").length} / {assignments.length} Done
-                  </span>
-                </div>
-
-                <div className="space-y-2 max-h-[260px] overflow-y-auto">
-                  {assignments.map((item) => {
-                    const isCurrent = item.incident_id === activeIncidentId;
-                    const isDone = item.status === "COLLECTED";
-
-                    return (
-                      <div
-                        key={item.incident_id}
-                        onClick={() => setActiveIncidentId(item.incident_id)}
-                        className={`p-3 rounded-2xl border text-xs cursor-pointer transition-all flex items-center justify-between ${
-                          isCurrent
-                            ? "bg-emerald-50/70 border-emerald-300 shadow-xs"
-                            : isDone
-                            ? "bg-slate-50 border-slate-200 opacity-60"
-                            : "bg-white border-slate-200 hover:border-slate-300"
-                        }`}
-                      >
-                        <div className="flex items-center gap-2.5">
-                          <span
-                            className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black text-white ${
-                              isDone
-                                ? "bg-slate-400"
-                                : item.priority === "P0"
-                                ? "bg-red-600"
-                                : item.priority === "P1"
-                                ? "bg-orange-600"
-                                : item.priority === "P2"
-                                ? "bg-amber-600"
-                                : "bg-blue-600"
-                            }`}
-                          >
-                            {item.sequence}
-                          </span>
-                          <div>
-                            <span className="font-bold text-slate-900 line-clamp-1">{item.title}</span>
-                            <span className="text-[10px] text-slate-400 font-medium">
-                              {item.priority} • {item.estimated_volume_m3 || 1.2} m³ • {formatRelativeTime(item.assigned_at)}
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-1">
-                          {isDone ? (
-                            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                          ) : (
-                            <ChevronRight className="w-4 h-4 text-slate-400" />
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
                 </div>
               </div>
             )}
           </div>
         </div>
       </main>
+
+      {/* Real Browser Camera Capture Modal */}
+      <CameraCaptureModal
+        isOpen={isCameraModalOpen}
+        onClose={() => setIsCameraModalOpen(false)}
+        onPhotoCaptured={handleCameraPhotoCaptured}
+      />
     </div>
   );
 }

@@ -3,6 +3,7 @@ WasteWise AI — Incidents & Reports Routers
 Implements duplicate report clustering, dynamic priority engine integration, and PostgreSQL persistence.
 """
 
+import math
 import uuid
 from datetime import datetime, timezone
 from typing import List, Optional
@@ -30,8 +31,15 @@ from app.models.entities import (
     VehicleStatus,
 )
 from app.schemas.all_schemas import (
+    DriverExecutionAssignmentInfo,
+    DriverExecutionDriverInfo,
+    DriverExecutionProofInfo,
+    DriverExecutionResponse,
+    ExecutionTimelineMilestone,
     IncidentRead,
     IncidentUpdate,
+    OfficerRejectProofRequest,
+    OfficerVerifyProofRequest,
     ReportCreate,
     ReportRead,
 )
@@ -539,3 +547,380 @@ async def update_incident(
         pass
 
     return inc
+
+
+# ---------------------------------------------------------------------------
+# 5. Incident Driver Execution & Officer Proof Verification
+# ---------------------------------------------------------------------------
+
+
+def _haversine_distance_meters(
+    lat1: float, lon1: float, lat2: float, lon2: float
+) -> float:
+    r = 6371e3
+    p1 = math.radians(lat1)
+    p2 = math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lon2 - lon1)
+    a = math.sin(dp / 2.0) ** 2 + math.cos(p1) * math.cos(p2) * (
+        math.sin(dl / 2.0) ** 2
+    )
+    c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
+    return r * c
+
+
+@incidents_router.get(
+    "/{incident_id}/driver-execution", response_model=DriverExecutionResponse
+)
+async def get_driver_execution_details(
+    incident_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    """
+    Retrieve comprehensive driver dispatch, live execution, proof-of-work, and audit timeline
+    for an incident. Accessible to Officers, Drivers, and Admins.
+    """
+    stmt = (
+        select(Incident)
+        .options(
+            selectinload(Incident.assigned_driver),
+            selectinload(Incident.assigned_vehicle),
+            selectinload(Incident.proofs),
+            selectinload(Incident.reports),
+        )
+        .where(Incident.id == incident_id)
+    )
+    res = await db.execute(stmt)
+    inc = res.scalar_one_or_none()
+
+    if not inc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found"
+        )
+
+    # Driver Info
+    driver_info = None
+    if inc.assigned_driver:
+        v_id = inc.assigned_vehicle.id if inc.assigned_vehicle else None
+        v_plate = inc.assigned_vehicle.plate_number if inc.assigned_vehicle else None
+        v_type = inc.assigned_vehicle.vehicle_type if inc.assigned_vehicle else None
+        driver_info = DriverExecutionDriverInfo(
+            id=inc.assigned_driver.id,
+            name=inc.assigned_driver.full_name or inc.assigned_driver.email,
+            email=inc.assigned_driver.email,
+            phone=inc.assigned_driver.phone_number,
+            vehicle_id=v_id,
+            vehicle_plate=v_plate,
+            vehicle_type=v_type,
+        )
+
+    # Elapsed minutes
+    elapsed = None
+    if inc.started_at:
+        end_time = inc.completed_at or datetime.now(timezone.utc)
+        elapsed = max(0, int((end_time - inc.started_at).total_seconds() / 60))
+
+    assignment_info = DriverExecutionAssignmentInfo(
+        status=inc.status.value,
+        priority=inc.priority.value,
+        assigned_at=inc.assigned_at,
+        started_at=inc.started_at,
+        completed_at=inc.completed_at,
+        elapsed_minutes=elapsed,
+    )
+
+    # Citizen evidence URLs (strictly isolated to this incident's reports)
+    citizen_evidence: List[str] = []
+    if inc.reports:
+        for rep in sorted(inc.reports, key=lambda r: r.created_at or inc.created_at):
+            if rep.image_urls:
+                citizen_evidence.extend(rep.image_urls)
+    if not citizen_evidence and inc.image_urls:
+        citizen_evidence.extend(inc.image_urls)
+    distinct_citizen_evidence = list(dict.fromkeys(citizen_evidence))
+
+    # Proof-of-work Info
+    proof_info = None
+    sorted_proofs = sorted(
+        inc.proofs, key=lambda p: p.uploaded_at or inc.created_at, reverse=True
+    )
+    if sorted_proofs:
+        latest_proof = sorted_proofs[0]
+        dist_m = None
+        is_verified_loc = True
+        if latest_proof.latitude is not None and latest_proof.longitude is not None:
+            dist_m = round(
+                _haversine_distance_meters(
+                    inc.latitude,
+                    inc.longitude,
+                    latest_proof.latitude,
+                    latest_proof.longitude,
+                ),
+                1,
+            )
+            is_verified_loc = dist_m <= 250.0
+
+        proof_info = DriverExecutionProofInfo(
+            id=latest_proof.id,
+            image_url=latest_proof.image_url,
+            storage_path=latest_proof.storage_path,
+            captured_at=latest_proof.captured_at or latest_proof.uploaded_at,
+            uploaded_at=latest_proof.uploaded_at,
+            latitude=latest_proof.latitude,
+            longitude=latest_proof.longitude,
+            accuracy=latest_proof.accuracy,
+            distance_meters=dist_m,
+            location_verified=is_verified_loc,
+            verification_status=latest_proof.verification_status,
+            notes=latest_proof.notes,
+        )
+
+    # Execution Timeline Milestones
+    timeline: List[ExecutionTimelineMilestone] = []
+
+    # 1. Incident Reported
+    timeline.append(
+        ExecutionTimelineMilestone(
+            event="INCIDENT_REPORTED",
+            timestamp=inc.created_at,
+            actor="Citizen Reporter",
+            notes=f"Reported at {inc.address_text or 'Municipal Sector'}",
+        )
+    )
+
+    # 2. Driver Assigned
+    if inc.assigned_at:
+        d_name = (
+            inc.assigned_driver.full_name if inc.assigned_driver else "Assigned Driver"
+        )
+        timeline.append(
+            ExecutionTimelineMilestone(
+                event="DRIVER_DISPATCHED",
+                timestamp=inc.assigned_at,
+                actor="Municipal Officer",
+                notes=f"Dispatched to {d_name}",
+            )
+        )
+
+    # 3. Collection Started
+    if inc.started_at:
+        d_name = inc.assigned_driver.full_name if inc.assigned_driver else "Driver"
+        timeline.append(
+            ExecutionTimelineMilestone(
+                event="COLLECTION_STARTED",
+                timestamp=inc.started_at,
+                actor=d_name,
+                notes="Driver arrived and initiated site clearance",
+            )
+        )
+
+    # 4. Proof Uploaded
+    if proof_info:
+        d_name = inc.assigned_driver.full_name if inc.assigned_driver else "Driver"
+        dist_note = (
+            f" ({proof_info.distance_meters}m from site)"
+            if proof_info.distance_meters is not None
+            else ""
+        )
+        timeline.append(
+            ExecutionTimelineMilestone(
+                event="PROOF_UPLOADED",
+                timestamp=proof_info.uploaded_at,
+                actor=d_name,
+                notes=f"Uploaded post-cleaning photo proof{dist_note}",
+            )
+        )
+
+    # 5. Collection Completed
+    if inc.completed_at:
+        d_name = inc.assigned_driver.full_name if inc.assigned_driver else "Driver"
+        timeline.append(
+            ExecutionTimelineMilestone(
+                event="COLLECTION_COMPLETED",
+                timestamp=inc.completed_at,
+                actor=d_name,
+                notes="Driver marked collection completed",
+            )
+        )
+
+    # 6. Verification Status Milestone
+    if proof_info and proof_info.verification_status in (
+        "VERIFIED",
+        "REJECTED",
+    ):
+        timeline.append(
+            ExecutionTimelineMilestone(
+                event=f"PROOF_{proof_info.verification_status}",
+                timestamp=inc.updated_at,
+                actor="Municipal Officer",
+                notes=proof_info.notes
+                or f"Proof status marked as {proof_info.verification_status}",
+            )
+        )
+
+    return DriverExecutionResponse(
+        incident_id=inc.id,
+        incident_code=f"WW-{str(inc.id)[:8].upper()}",
+        title=inc.title,
+        status=inc.status.value,
+        priority=inc.priority.value,
+        category=inc.category.value,
+        latitude=inc.latitude,
+        longitude=inc.longitude,
+        address=inc.address_text,
+        driver=driver_info,
+        assignment=assignment_info,
+        citizen_evidence_urls=distinct_citizen_evidence,
+        proof=proof_info,
+        timeline=timeline,
+    )
+
+
+@incidents_router.post("/{incident_id}/verify-proof")
+async def verify_incident_proof(
+    incident_id: uuid.UUID,
+    payload: OfficerVerifyProofRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(
+        require_role(["OFFICER", "ADMIN", "SUPERADMIN"])
+    ),
+):
+    """
+    Officer confirms and verifies the driver's uploaded proof of work.
+    Transitions incident status to RESOLVED and broadcasts realtime confirmation.
+    """
+    stmt = (
+        select(Incident)
+        .options(selectinload(Incident.proofs), selectinload(Incident.assigned_driver))
+        .where(Incident.id == incident_id)
+    )
+    res = await db.execute(stmt)
+    inc = res.scalar_one_or_none()
+
+    if not inc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found"
+        )
+
+    if not inc.proofs:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot verify: No proof of collection has been uploaded for this incident",
+        )
+
+    # Update latest proof status
+    latest_proof = sorted(
+        inc.proofs, key=lambda p: p.uploaded_at or inc.created_at, reverse=True
+    )[0]
+    latest_proof.verification_status = "VERIFIED"
+    if payload.notes:
+        latest_proof.notes = payload.notes
+
+    # Transition incident status to VERIFIED
+    inc.status = IncidentStatus.VERIFIED
+    inc.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(inc)
+
+    # Broadcast real-time verification event
+    try:
+        await ws_manager.broadcast_event(
+            event_type="INCIDENT_VERIFIED",
+            data={
+                "incident_id": str(inc.id),
+                "incident_code": f"WW-{str(inc.id)[:8].upper()}",
+                "status": "VERIFIED",
+                "proof_status": "VERIFIED",
+                "verified_at": inc.updated_at.isoformat(),
+                "verified_by": current_user.sub,
+                "notes": payload.notes,
+            },
+        )
+    except Exception:
+        pass
+
+    return {
+        "success": True,
+        "incident_id": str(inc.id),
+        "status": "VERIFIED",
+        "proof_status": "VERIFIED",
+        "verified_at": inc.updated_at.isoformat(),
+        "notes": payload.notes,
+    }
+
+
+@incidents_router.post("/{incident_id}/reject-proof")
+async def reject_incident_proof(
+    incident_id: uuid.UUID,
+    payload: OfficerRejectProofRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(
+        require_role(["OFFICER", "ADMIN", "SUPERADMIN"])
+    ),
+):
+    """
+    Officer rejects the driver's uploaded proof photo with mandatory reason.
+    Transitions incident status back to IN_PROGRESS so the driver can retake and re-upload.
+    """
+    stmt = (
+        select(Incident)
+        .options(selectinload(Incident.proofs), selectinload(Incident.assigned_driver))
+        .where(Incident.id == incident_id)
+    )
+    res = await db.execute(stmt)
+    inc = res.scalar_one_or_none()
+
+    if not inc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found"
+        )
+
+    if not inc.proofs:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot reject: No proof of collection has been uploaded for this incident",
+        )
+
+    latest_proof = sorted(
+        inc.proofs, key=lambda p: p.uploaded_at or inc.created_at, reverse=True
+    )[0]
+    latest_proof.verification_status = "REJECTED"
+    rejection_note = f"REJECTED: {payload.reason}"
+    if payload.notes:
+        rejection_note += f" — {payload.notes}"
+    latest_proof.notes = rejection_note
+
+    # Reset status to IN_PROGRESS for driver retake
+    inc.status = IncidentStatus.IN_PROGRESS
+    inc.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(inc)
+
+    # Broadcast rejection event to Driver Cockpit & Officer CommandCenter
+    try:
+        await ws_manager.broadcast_event(
+            event_type="INCIDENT_PROOF_REJECTED",
+            data={
+                "incident_id": str(inc.id),
+                "incident_code": f"WW-{str(inc.id)[:8].upper()}",
+                "status": "IN_PROGRESS",
+                "proof_status": "REJECTED",
+                "rejection_reason": payload.reason,
+                "notes": payload.notes,
+                "driver_id": (
+                    str(inc.assigned_driver_id) if inc.assigned_driver_id else None
+                ),
+            },
+        )
+    except Exception:
+        pass
+
+    return {
+        "success": True,
+        "incident_id": str(inc.id),
+        "status": "IN_PROGRESS",
+        "proof_status": "REJECTED",
+        "reason": payload.reason,
+        "notes": payload.notes,
+    }

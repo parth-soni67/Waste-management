@@ -171,12 +171,18 @@ async def get_optional_user(
 def require_role(*allowed_roles):
     """
     RBAC dependency factory per security_guide.md §2.
-    Usage: `current_user: TokenPayload = Depends(require_role("officer", "admin"))`
-    Handles strings, enums, and uppercase/lowercase matching robustly.
+    Usage: `current_user: TokenPayload = Depends(require_role("officer", "admin"))` or `require_role(["officer", "admin"])`
+    Handles strings, enums, lists/tuples, and uppercase/lowercase matching robustly.
     """
+    flattened = []
+    for r in allowed_roles:
+        if isinstance(r, (list, tuple, set)):
+            flattened.extend(r)
+        else:
+            flattened.append(r)
+
     normalized_allowed = {
-        r.value.upper() if hasattr(r, "value") else str(r).upper()
-        for r in allowed_roles
+        r.value.upper() if hasattr(r, "value") else str(r).upper() for r in flattened
     }
 
     async def role_checker(

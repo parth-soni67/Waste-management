@@ -358,3 +358,124 @@ async def test_proof_upload_validation_and_completion_enforcement(
         proofs = get_proof_res.json()
         assert len(proofs) == 1
         assert proofs[0]["driver_id"] == str(driver_a["id"])
+
+
+@pytest.mark.asyncio
+async def test_officer_driver_execution_details_and_verification_flow(
+    driver_a, officer_user
+):
+    """
+    Test end-to-end officer driver-execution detail inspection,
+    proof verification and status transition to RESOLVED.
+    """
+    inc_id = uuid.uuid4()
+    async with TestSessionLocal() as session:
+        inc = Incident(
+            id=inc_id,
+            title="Execution Detail Test Incident",
+            category=WasteCategory.PLASTIC,
+            priority=PriorityLevel.P1,
+            status=IncidentStatus.ASSIGNED,
+            latitude=23.033,
+            longitude=72.586,
+            assigned_vehicle_id=driver_a["vehicle_id"],
+            assigned_driver_id=driver_a["id"],
+        )
+        session.add(inc)
+        await session.commit()
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # 1. Upload valid JPEG proof as Driver
+        img_bytes = create_dummy_image()
+        files = {"file": ("after_cleaning.jpg", img_bytes, "image/jpeg")}
+        proof_res = await client.post(
+            f"/api/v1/incidents/{inc_id}/proof",
+            files=files,
+            data={"latitude": "23.033", "longitude": "72.586", "notes": "Cleaned"},
+            headers={"Authorization": f"Bearer {driver_a['token']}"},
+        )
+        assert proof_res.status_code == 200
+
+        # Complete collection
+        await client.patch(
+            f"/api/v1/incidents/{inc_id}/complete",
+            json={"latitude": 23.033, "longitude": 72.586},
+            headers={"Authorization": f"Bearer {driver_a['token']}"},
+        )
+
+        # 2. Officer inspects driver execution endpoint
+        exec_res = await client.get(
+            f"/api/v1/incidents/{inc_id}/driver-execution",
+            headers={"Authorization": f"Bearer {officer_user['token']}"},
+        )
+        assert exec_res.status_code == 200
+        exec_data = exec_res.json()
+        assert exec_data["incident_id"] == str(inc_id)
+        assert exec_data["driver"]["name"] == "Driver Alice"
+        assert exec_data["driver"]["vehicle_plate"] == "GJ-01-WM-1111"
+        assert exec_data["proof"] is not None
+        assert exec_data["proof"]["location_verified"] is True
+        assert len(exec_data["timeline"]) >= 3
+
+        # 3. Officer verifies proof
+        verify_res = await client.post(
+            f"/api/v1/incidents/{inc_id}/verify-proof",
+            json={"notes": "Area inspected and confirmed clean."},
+            headers={"Authorization": f"Bearer {officer_user['token']}"},
+        )
+        assert verify_res.status_code == 200
+        verify_data = verify_res.json()
+        assert verify_data["success"] is True
+        assert verify_data["status"] == "VERIFIED"
+        assert verify_data["proof_status"] == "VERIFIED"
+
+
+@pytest.mark.asyncio
+async def test_officer_reject_proof_flow(driver_a, officer_user):
+    """
+    Test officer rejecting proof with reason and resetting incident to IN_PROGRESS.
+    """
+    inc_id = uuid.uuid4()
+    async with TestSessionLocal() as session:
+        inc = Incident(
+            id=inc_id,
+            title="Reject Proof Incident",
+            category=WasteCategory.MIXED,
+            priority=PriorityLevel.P2,
+            status=IncidentStatus.ASSIGNED,
+            latitude=23.033,
+            longitude=72.586,
+            assigned_vehicle_id=driver_a["vehicle_id"],
+            assigned_driver_id=driver_a["id"],
+        )
+        session.add(inc)
+        await session.commit()
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # 1. Driver uploads proof
+        img_bytes = create_dummy_image()
+        files = {"file": ("unclear_photo.jpg", img_bytes, "image/jpeg")}
+        await client.post(
+            f"/api/v1/incidents/{inc_id}/proof",
+            files=files,
+            data={"latitude": "23.033", "longitude": "72.586"},
+            headers={"Authorization": f"Bearer {driver_a['token']}"},
+        )
+
+        # 2. Officer rejects proof
+        reject_res = await client.post(
+            f"/api/v1/incidents/{inc_id}/reject-proof",
+            json={
+                "reason": "Photo is blurry, dark, or unrecognizable",
+                "notes": "Please take photo in better lighting.",
+            },
+            headers={"Authorization": f"Bearer {officer_user['token']}"},
+        )
+        assert reject_res.status_code == 200
+        reject_data = reject_res.json()
+        assert reject_data["success"] is True
+        assert reject_data["status"] == "IN_PROGRESS"
+        assert reject_data["proof_status"] == "REJECTED"
+        assert "blurry" in reject_data["reason"]

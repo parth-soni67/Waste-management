@@ -153,16 +153,38 @@ async def get_driver_assignments(
         )
         sla_left = max(0, target_sla - elapsed_mins)
 
-        # Aggregate citizen images from reports
-        citizen_imgs = []
-        if inc.image_urls:
-            citizen_imgs.extend(inc.image_urls)
-        for r in inc.reports:
-            if r.image_urls:
-                citizen_imgs.extend(r.image_urls)
+        # Separate primary report evidence from clustered report evidence
+        sorted_reports = sorted(
+            inc.reports, key=lambda r: r.created_at or inc.created_at
+        )
+        primary_imgs: List[str] = []
+        cluster_imgs: List[str] = []
 
-        distinct_citizen_imgs = list(dict.fromkeys(citizen_imgs))
+        if sorted_reports:
+            primary_rep = sorted_reports[0]
+            if primary_rep.image_urls:
+                primary_imgs = list(primary_rep.image_urls)
+            for rep in sorted_reports[1:]:
+                if rep.image_urls:
+                    for u in rep.image_urls:
+                        if u not in primary_imgs and u not in cluster_imgs:
+                            cluster_imgs.append(u)
+
+        if not primary_imgs and inc.image_urls:
+            primary_imgs = [inc.image_urls[0]]
+            for u in inc.image_urls[1:]:
+                if u not in primary_imgs and u not in cluster_imgs:
+                    cluster_imgs.append(u)
+
+        distinct_citizen_imgs = list(dict.fromkeys(primary_imgs + cluster_imgs))
         proof_imgs = [p.image_url for p in inc.proofs]
+
+        vol_source = "CLUSTER_AGGREGATE" if inc.report_count > 1 else "AI_ESTIMATE"
+        rounded_vol = (
+            round(inc.estimated_volume_m3, 2)
+            if inc.estimated_volume_m3 is not None
+            else 1.50
+        )
 
         veh = inc.assigned_vehicle or primary_vehicle
         plate = veh.plate_number if veh else "GJ-01-WM-4402"
@@ -178,7 +200,10 @@ async def get_driver_assignments(
                 priority=inc.priority,
                 category=inc.category,
                 severity_score=inc.severity_score,
-                estimated_volume_m3=inc.estimated_volume_m3,
+                estimated_volume_m3=rounded_vol,
+                volume_source=vol_source,
+                volume_confidence=inc.confidence or 0.90,
+                report_count=inc.report_count,
                 latitude=inc.latitude,
                 longitude=inc.longitude,
                 address=inc.address_text,
@@ -191,6 +216,8 @@ async def get_driver_assignments(
                 vehicle_plate=plate,
                 vehicle_capacity_kg=cap,
                 vehicle_current_load_kg=load,
+                primary_image_urls=primary_imgs,
+                cluster_image_urls=cluster_imgs,
                 citizen_image_urls=distinct_citizen_imgs,
                 proof_image_urls=proof_imgs,
             )

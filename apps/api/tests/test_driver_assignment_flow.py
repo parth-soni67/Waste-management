@@ -254,3 +254,112 @@ async def test_officer_dispatch_and_driver_cockpit_isolation():
         )
         assert complete_res.status_code == 200
         assert complete_res.json()["new_status"] == "COLLECTED"
+
+
+@pytest.mark.asyncio
+async def test_driver_assignment_primary_vs_cluster_evidence_and_volume():
+    """
+    Verify:
+    1. Report 1 submitted with image A (vol = 2.44).
+    2. Report 2 submitted nearby (<100m) with image B (vol = 5.25).
+    3. Merged incident has volume 7.69 (properly rounded, not float artifact).
+    4. Driver assignment returns primary_image_urls = [imageA] and cluster_image_urls = [imageB].
+    5. volume_source = "CLUSTER_AGGREGATE".
+    """
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        officer_id = uuid.uuid4()
+        officer_token = create_access_token(user_id=str(officer_id), role="OFFICER")
+        officer_headers = {"Authorization": f"Bearer {officer_token}"}
+
+        driver_id = uuid.uuid4()
+        driver_token = create_access_token(user_id=str(driver_id), role="DRIVER")
+        driver_headers = {"Authorization": f"Bearer {driver_token}"}
+
+        # Seed driver in database
+        async with TestSessionLocal() as session:
+            d_user = User(
+                id=driver_id,
+                email=f"driver_{uuid.uuid4().hex[:6]}@test.gov",
+                hashed_password="hash",
+                full_name="Driver Dilip",
+                role=UserRole.DRIVER,
+            )
+            session.add(d_user)
+            await session.commit()
+
+        # 1. Create vehicle assigned to driver
+        veh_res = await client.post(
+            "/api/v1/vehicles",
+            json={
+                "plate_number": f"GJ-01-WM-{uuid.uuid4().hex[:4].upper()}",
+                "vehicle_type": "Compactor 5T",
+                "capacity_kg": 5000.0,
+                "driver_id": str(driver_id),
+                "current_lat": 23.0500,
+                "current_lng": 72.5600,
+            },
+            headers=officer_headers,
+        )
+        assert veh_res.status_code == 201
+        vehicle_id = veh_res.json()["id"]
+
+        # 2. Citizen 1 submits Report 1
+        rep1_res = await client.post(
+            "/api/v1/reports",
+            json={
+                "category": "mixed",
+                "confidence": 0.92,
+                "estimated_volume_m3": 2.44,
+                "severity_score": 7.5,
+                "description": "First report at market",
+                "latitude": 23.0500,
+                "longitude": 72.5600,
+                "image_urls": ["https://supabase.co/img1.jpg"],
+            },
+        )
+        assert rep1_res.status_code == 201
+        inc_id = rep1_res.json()["incident_id"]
+
+        # 3. Citizen 2 submits Report 2 nearby (< 50m)
+        rep2_res = await client.post(
+            "/api/v1/reports",
+            json={
+                "category": "mixed",
+                "confidence": 0.95,
+                "estimated_volume_m3": 5.25,
+                "severity_score": 8.0,
+                "description": "Second report at same market pile",
+                "latitude": 23.0502,
+                "longitude": 72.5601,
+                "image_urls": ["https://supabase.co/img2.jpg"],
+            },
+        )
+        assert rep2_res.status_code == 201
+        assert rep2_res.json()["incident_id"] == inc_id  # Clustered into same incident
+
+        # 4. Officer assigns vehicle to incident
+        assign_res = await client.patch(
+            f"/api/v1/incidents/{inc_id}",
+            json={
+                "status": "ASSIGNED",
+                "assigned_vehicle_id": vehicle_id,
+                "priority": "P1",
+            },
+            headers=officer_headers,
+        )
+        assert assign_res.status_code == 200
+
+        # 5. Driver queries assignments
+        d_res = await client.get("/api/v1/driver/assignments", headers=driver_headers)
+        assert d_res.status_code == 200
+        assignments = d_res.json()
+        assert len(assignments) >= 1
+        inc_assign = next(a for a in assignments if a["incident_id"] == inc_id)
+
+        # 6. Assert clean rounding and separated evidence
+        assert inc_assign["estimated_volume_m3"] == 7.69
+        assert inc_assign["volume_source"] == "CLUSTER_AGGREGATE"
+        assert inc_assign["report_count"] == 2
+        assert "https://supabase.co/img1.jpg" in inc_assign["primary_image_urls"]
+        assert "https://supabase.co/img2.jpg" in inc_assign["cluster_image_urls"]

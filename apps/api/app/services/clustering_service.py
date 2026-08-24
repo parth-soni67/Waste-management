@@ -117,9 +117,10 @@ class DuplicateClusteringService:
                 closest_incident.severity_score = severity_score
 
             if estimated_volume_m3:
-                closest_incident.estimated_volume_m3 = (
-                    closest_incident.estimated_volume_m3 or 0.0
-                ) + estimated_volume_m3
+                closest_incident.estimated_volume_m3 = round(
+                    (closest_incident.estimated_volume_m3 or 0.0) + estimated_volume_m3,
+                    2,
+                )
 
             if detected_tags:
                 existing_tags = set(closest_incident.detected_tags or [])

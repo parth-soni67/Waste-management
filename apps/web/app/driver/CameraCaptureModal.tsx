@@ -3,10 +3,10 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { Camera, RefreshCw, Check, X, AlertCircle } from "lucide-react";
 
-interface CameraCaptureModalProps {
+export interface CameraCaptureModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onPhotoCaptured: (file: File, previewUrl: string) => void;
+  onPhotoCaptured: (file: File, previewUrl: string) => void | Promise<void>;
 }
 
 export default function CameraCaptureModal({
@@ -20,6 +20,8 @@ export default function CameraCaptureModal({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [isInitializing, setIsInitializing] = useState<boolean>(true);
+  const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  const [confirmError, setConfirmError] = useState<string | null>(null);
   const [facingMode, setFacingMode] = useState<"environment" | "user">("environment");
 
   // Stop camera media tracks cleanly
@@ -38,6 +40,7 @@ export default function CameraCaptureModal({
     stopCameraStream();
     setIsInitializing(true);
     setCameraError(null);
+    setConfirmError(null);
 
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -76,6 +79,7 @@ export default function CameraCaptureModal({
       timer = setTimeout(() => {
         setCapturedBlob(null);
         setPreviewUrl(null);
+        setConfirmError(null);
         void startCameraStream(facingMode);
       }, 0);
     } else {
@@ -104,7 +108,7 @@ export default function CameraCaptureModal({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    // Draw the current video frame
+    // Draw current frame
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
     canvas.toBlob(
@@ -128,16 +132,37 @@ export default function CameraCaptureModal({
     }
     setCapturedBlob(null);
     setPreviewUrl(null);
+    setConfirmError(null);
     void startCameraStream(facingMode);
   };
 
-  // Use captured photo
-  const handleConfirmPhoto = () => {
-    if (!capturedBlob || !previewUrl) return;
-    const fileName = `driver_proof_${Date.now()}.jpg`;
-    const file = new File([capturedBlob], fileName, { type: "image/jpeg" });
-    onPhotoCaptured(file, previewUrl);
-    onClose();
+  // Confirm photo and pass File to parent
+  const handleConfirmPhoto = async () => {
+    if (!capturedBlob || !previewUrl) {
+      setConfirmError("No photo captured yet.");
+      return;
+    }
+
+    if (typeof onPhotoCaptured !== "function") {
+      console.error("CameraCaptureModal: onPhotoCaptured callback is not a function", onPhotoCaptured);
+      setConfirmError("Camera confirmation callback is not configured.");
+      return;
+    }
+
+    try {
+      setIsProcessing(true);
+      setConfirmError(null);
+      const fileName = `driver_proof_${Date.now()}.jpg`;
+      const file = new File([capturedBlob], fileName, { type: "image/jpeg" });
+
+      await onPhotoCaptured(file, previewUrl);
+      onClose();
+    } catch (err: unknown) {
+      console.error("Error confirming captured photo:", err);
+      setConfirmError(err instanceof Error ? err.message : "Failed to confirm captured photo.");
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   // Toggle rear / front camera
@@ -148,12 +173,22 @@ export default function CameraCaptureModal({
   };
 
   // Fallback file input if camera permission denied
-  const handleFallbackFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFallbackFileInput = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
       const url = URL.createObjectURL(file);
-      onPhotoCaptured(file, url);
-      onClose();
+      if (typeof onPhotoCaptured === "function") {
+        try {
+          setIsProcessing(true);
+          await onPhotoCaptured(file, url);
+          onClose();
+        } catch (err) {
+          console.error("Error in fallback photo handler:", err);
+          setConfirmError("Failed to select fallback image.");
+        } finally {
+          setIsProcessing(false);
+        }
+      }
     }
   };
 
@@ -258,6 +293,14 @@ export default function CameraCaptureModal({
           )}
         </div>
 
+        {/* Optional Confirmation Error Toast */}
+        {confirmError && (
+          <div className="px-5 py-2.5 bg-red-950/80 border-t border-red-800 text-red-300 text-xs flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{confirmError}</span>
+          </div>
+        )}
+
         {/* Controls Footer */}
         <div className="p-4 bg-slate-900 border-t border-slate-800 flex items-center justify-between gap-3">
           {!previewUrl ? (
@@ -297,7 +340,8 @@ export default function CameraCaptureModal({
               <button
                 type="button"
                 onClick={handleRetake}
-                className="flex-1 py-3 px-4 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white font-bold text-xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                disabled={isProcessing}
+                className="flex-1 py-3 px-4 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white font-bold text-xs transition-colors flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
               >
                 <RefreshCw className="w-4 h-4" />
                 <span>Retake Photo</span>
@@ -306,10 +350,20 @@ export default function CameraCaptureModal({
               <button
                 type="button"
                 onClick={handleConfirmPhoto}
-                className="flex-1 py-3 px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs tracking-wide shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
+                disabled={isProcessing}
+                className="flex-1 py-3 px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs tracking-wide shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
               >
-                <Check className="w-4 h-4" />
-                <span>Use This Photo</span>
+                {isProcessing ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>Processing...</span>
+                  </>
+                ) : (
+                  <>
+                    <Check className="w-4 h-4" />
+                    <span>Use This Photo</span>
+                  </>
+                )}
               </button>
             </>
           )}

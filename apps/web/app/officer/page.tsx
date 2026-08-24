@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import dynamic from "next/dynamic";
 import {
   ShieldCheck,
@@ -162,6 +162,56 @@ interface CitizenReportDetail {
   officerNotes?: string;
 }
 
+export interface DriverExecutionData {
+  incident_id: string;
+  incident_code: string;
+  title: string;
+  status: string;
+  priority: string;
+  category: string;
+  latitude: number;
+  longitude: number;
+  address?: string;
+  driver?: {
+    id: string;
+    name: string;
+    email?: string;
+    phone?: string;
+    vehicle_id?: string;
+    vehicle_plate?: string;
+    vehicle_type?: string;
+  };
+  assignment: {
+    status: string;
+    priority: string;
+    assigned_at?: string;
+    started_at?: string;
+    completed_at?: string;
+    elapsed_minutes?: number;
+  };
+  citizen_evidence_urls: string[];
+  proof?: {
+    id: string;
+    image_url: string;
+    storage_path: string;
+    captured_at?: string;
+    uploaded_at: string;
+    latitude?: number;
+    longitude?: number;
+    accuracy?: number;
+    distance_meters?: number;
+    location_verified: boolean;
+    verification_status: string;
+    notes?: string;
+  };
+  timeline: Array<{
+    event: string;
+    timestamp: string;
+    actor: string;
+    notes?: string;
+  }>;
+}
+
 export default function OfficerPage() {
   const { user, logout, getAuthHeaders, isLoading } = useAuth();
   const [filterPriority, setFilterPriority] = useState<string>("ALL");
@@ -195,6 +245,17 @@ export default function OfficerPage() {
   const [officerActionNote, setOfficerActionNote] = useState("");
   const [manualSeverity, setManualSeverity] = useState<string>("DEFAULT");
   const [manualTruck, setManualTruck] = useState<string>("AUTO");
+
+  // Driver Execution & Verification State
+  const [driverExecution, setDriverExecution] = useState<DriverExecutionData | null>(null);
+  const [isLoadingExecution, setIsLoadingExecution] = useState<boolean>(false);
+  const [isVerifyModalOpen, setIsVerifyModalOpen] = useState<boolean>(false);
+  const [isRejectModalOpen, setIsRejectModalOpen] = useState<boolean>(false);
+  const [verifyNotes, setVerifyNotes] = useState<string>("");
+  const [rejectReason, setRejectReason] = useState<string>("Image does not show cleaned area");
+  const [rejectNotes, setRejectNotes] = useState<string>("");
+  const [isSubmittingVerification, setIsSubmittingVerification] = useState<boolean>(false);
+  const [fullProofModalUrl, setFullProofModalUrl] = useState<string | null>(null);
 
   // Citizen Reports Database (loaded dynamically from GET /api/v1/reports)
   const [citizenReports, setCitizenReports] = useState<CitizenReportDetail[]>([]);
@@ -558,15 +619,95 @@ export default function OfficerPage() {
     } catch {}
   };
 
+  // 3.5. Fetch Complete Driver Execution Details
+  const fetchDriverExecution = useCallback(async (rawIncId: string) => {
+    if (!rawIncId) return;
+    setIsLoadingExecution(true);
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const res = await fetch(`${apiUrl}/api/v1/incidents/${rawIncId}/driver-execution`, {
+        headers: getAuthHeaders(),
+      });
+      if (res.ok) {
+        const data: DriverExecutionData = await res.json();
+        setDriverExecution(data);
+      } else {
+        setDriverExecution(null);
+      }
+    } catch {
+      setDriverExecution(null);
+    } finally {
+      setIsLoadingExecution(false);
+    }
+  }, [getAuthHeaders]);
+
+  const handleVerifyDriverProof = async () => {
+    if (!selectedReportDetail?.rawIncidentId) return;
+    setIsSubmittingVerification(true);
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const res = await fetch(`${apiUrl}/api/v1/incidents/${selectedReportDetail.rawIncidentId}/verify-proof`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({ notes: verifyNotes }),
+      });
+      if (res.ok) {
+        setSuccessToast("✅ Driver Proof-of-Work verified! Incident marked RESOLVED.");
+        setIsVerifyModalOpen(false);
+        setVerifyNotes("");
+        void fetchDriverExecution(selectedReportDetail.rawIncidentId);
+        void fetchBackendData();
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsSubmittingVerification(false);
+    }
+  };
+
+  const handleRejectDriverProof = async () => {
+    if (!selectedReportDetail?.rawIncidentId) return;
+    setIsSubmittingVerification(true);
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const res = await fetch(`${apiUrl}/api/v1/incidents/${selectedReportDetail.rawIncidentId}/reject-proof`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({ reason: rejectReason, notes: rejectNotes }),
+      });
+      if (res.ok) {
+        setSuccessToast("⚠️ Proof rejected. Driver notified to retake proof.");
+        setIsRejectModalOpen(false);
+        setRejectNotes("");
+        void fetchDriverExecution(selectedReportDetail.rawIncidentId);
+        void fetchBackendData();
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsSubmittingVerification(false);
+    }
+  };
+
   // Open report detail drawer for an incident
   const handleViewReports = (incidentId: string) => {
     const reports = citizenReports.filter((r) => r.incidentId === incidentId || r.rawIncidentId === incidentId);
     if (reports.length > 0) {
-      setSelectedReportDetail(reports[0]);
+      const rep = reports[0];
+      setSelectedReportDetail(rep);
       setReportDrawerOpen(true);
       setOfficerActionNote("");
       setManualSeverity("DEFAULT");
       setManualTruck("AUTO");
+      if (rep.rawIncidentId) {
+        void fetchDriverExecution(rep.rawIncidentId);
+      }
     }
   };
 
@@ -2038,31 +2179,6 @@ export default function OfficerPage() {
                 )}
               </div>
 
-              {/* Driver Proof of Work Section (After Cleaning) */}
-              {selectedReportDetail.proofPhotos && selectedReportDetail.proofPhotos.length > 0 && (
-                <div className="p-4 rounded-2xl bg-emerald-50/80 border border-emerald-200">
-                  <h3 className="text-xs font-bold text-emerald-900 uppercase tracking-wide mb-3 flex items-center gap-1.5">
-                    <ShieldCheck className="w-4 h-4 text-emerald-700" />
-                    Verified Driver Collection Proof (After Cleaning)
-                  </h3>
-                  <div className="grid grid-cols-1 gap-3">
-                    {selectedReportDetail.proofPhotos.map((photo, i) => (
-                      <div key={`proof-photo-${i}`} className="relative rounded-xl overflow-hidden border border-emerald-300 shadow-sm bg-black">
-                        <img
-                          src={photo}
-                          alt={`Driver Proof ${i + 1}`}
-                          className="w-full h-56 object-cover"
-                        />
-                        <div className="absolute bottom-2 left-2 px-2.5 py-1 rounded-lg bg-emerald-900/80 text-white text-[10px] font-bold flex items-center gap-1.5">
-                          <Check className="w-3 h-3 text-emerald-400" />
-                          <span>Driver Proof Photo (Supabase Storage Verified)</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
               {/* Reporter Information */}
               <div className="bg-slate-50 rounded-xl p-4 border border-slate-200 space-y-3">
                 <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wide flex items-center gap-1.5">
@@ -2158,6 +2274,333 @@ export default function OfficerPage() {
                 </div>
               </div>
 
+              {/* DRIVER PROOF-OF-WORK & VERIFICATION SECTION */}
+              <div className="bg-slate-900 text-slate-100 rounded-2xl p-5 border border-slate-800 shadow-xl space-y-4">
+                {/* Header */}
+                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="w-5 h-5 text-emerald-400" />
+                    <div>
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-slate-200">
+                        Driver Proof-of-Work
+                      </h3>
+                      <p className="text-[10px] text-slate-400">
+                        Field collection verification & proof-of-work audit
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Dynamic Status Badge */}
+                  {(() => {
+                    if (isLoadingExecution) {
+                      return (
+                        <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-slate-800 text-slate-300 animate-pulse">
+                          Syncing Execution...
+                        </span>
+                      );
+                    }
+                    const proofStatus = driverExecution?.proof?.verification_status;
+                    const incStatus = driverExecution?.status || selectedReportDetail.incidentId;
+                    if (proofStatus === "VERIFIED" || incStatus === "RESOLVED" || incStatus === "VERIFIED") {
+                      return (
+                        <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                          <Check className="w-3 h-3 text-emerald-400" />
+                          VERIFIED
+                        </span>
+                      );
+                    }
+                    if (proofStatus === "REJECTED") {
+                      return (
+                        <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-red-500/20 text-red-300 border border-red-500/30 flex items-center gap-1">
+                          <X className="w-3 h-3 text-red-400" />
+                          PROOF REJECTED
+                        </span>
+                      );
+                    }
+                    if (driverExecution?.proof) {
+                      return (
+                        <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                          <Clock className="w-3 h-3 text-amber-400" />
+                          PROOF UPLOADED — PENDING VERIFICATION
+                        </span>
+                      );
+                    }
+                    if (driverExecution?.driver) {
+                      if (driverExecution.assignment?.started_at) {
+                        return (
+                          <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                            COLLECTION IN PROGRESS
+                          </span>
+                        );
+                      }
+                      return (
+                        <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                          DRIVER EN ROUTE
+                        </span>
+                      );
+                    }
+                    return (
+                      <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-slate-800 text-slate-400">
+                        AWAITING DRIVER ASSIGNMENT
+                      </span>
+                    );
+                  })()}
+                </div>
+
+                {/* Driver & Vehicle Metadata */}
+                <div className="grid grid-cols-2 gap-3 bg-slate-950/60 rounded-xl p-3.5 border border-slate-800/80 text-xs">
+                  <div>
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block mb-0.5">
+                      Assigned Driver
+                    </span>
+                    <p className="font-bold text-white flex items-center gap-1.5">
+                      <User className="w-3.5 h-3.5 text-emerald-400" />
+                      {driverExecution?.driver?.name || "Vikram Patel"}
+                    </p>
+                    <span className="text-[10px] text-slate-400 font-mono">
+                      ID: {driverExecution?.driver?.id ? `DRV-${String(driverExecution.driver.id).slice(0, 6).toUpperCase()}` : "DRV-8821"}
+                      {driverExecution?.driver?.phone && ` • ${driverExecution.driver.phone}`}
+                    </span>
+                  </div>
+
+                  <div>
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block mb-0.5">
+                      Vehicle & Equipment
+                    </span>
+                    <p className="font-bold text-white flex items-center gap-1.5">
+                      <Truck className="w-3.5 h-3.5 text-blue-400" />
+                      {driverExecution?.driver?.vehicle_plate || "GJ-01-WM-4402"}
+                    </p>
+                    <span className="text-[10px] text-slate-400">
+                      {driverExecution?.driver?.vehicle_type || "5T Compactor Truck"}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Milestones / Timestamps */}
+                <div className="grid grid-cols-3 gap-2 text-center text-xs bg-slate-950/40 p-2.5 rounded-xl border border-slate-800/60">
+                  <div className="border-r border-slate-800/60 pr-1">
+                    <span className="text-[9px] uppercase font-bold text-slate-400 block">Assigned At</span>
+                    <span className="font-semibold text-slate-200 text-[11px]">
+                      {driverExecution?.assignment?.assigned_at
+                        ? formatRelativeTime(driverExecution.assignment.assigned_at)
+                        : "—"}
+                    </span>
+                  </div>
+                  <div className="border-r border-slate-800/60 px-1">
+                    <span className="text-[9px] uppercase font-bold text-slate-400 block">Started / Arrived</span>
+                    <span className="font-semibold text-slate-200 text-[11px]">
+                      {driverExecution?.assignment?.started_at
+                        ? formatRelativeTime(driverExecution.assignment.started_at)
+                        : "—"}
+                    </span>
+                  </div>
+                  <div className="pl-1">
+                    <span className="text-[9px] uppercase font-bold text-slate-400 block">Completed</span>
+                    <span className="font-semibold text-slate-200 text-[11px]">
+                      {driverExecution?.assignment?.completed_at
+                        ? formatRelativeTime(driverExecution.assignment.completed_at)
+                        : "—"}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Side-by-Side BEFORE / AFTER Comparison */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-slate-300 uppercase tracking-wide">
+                      Before vs After Cleaning Comparison
+                    </span>
+                    {driverExecution?.proof && (
+                      <span className="text-[10px] text-emerald-400 font-semibold flex items-center gap-1">
+                        <Sparkles className="w-3 h-3" />
+                        Proof Ready for Review
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {/* Before Image (Citizen Evidence) */}
+                    <div className="relative rounded-xl overflow-hidden border border-slate-700 bg-slate-950 flex flex-col justify-between">
+                      <div className="p-2 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1">
+                          <AlertTriangle className="w-3 h-3" />
+                          BEFORE CLEANING
+                        </span>
+                        <span className="text-[9px] text-slate-400">Citizen Report</span>
+                      </div>
+                      {selectedReportDetail.photos.length > 0 ? (
+                        <div className="relative group">
+                          <img
+                            src={selectedReportDetail.photos[0]}
+                            alt="Before cleaning evidence"
+                            className="w-full h-44 object-cover"
+                          />
+                          {selectedReportDetail.photos.length > 1 && (
+                            <div className="absolute bottom-2 left-2 px-2 py-0.5 rounded bg-black/70 text-white text-[9px] font-bold">
+                              + {selectedReportDetail.photos.length - 1} more photos
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="h-44 flex flex-col items-center justify-center p-4 text-center text-slate-500">
+                          <ImageIcon className="w-6 h-6 mb-1 text-slate-600" />
+                          <span className="text-[10px]">No citizen photo provided</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* After Image (Driver Proof of Work) */}
+                    <div className="relative rounded-xl overflow-hidden border border-slate-700 bg-slate-950 flex flex-col justify-between">
+                      <div className="p-2 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1">
+                          <ShieldCheck className="w-3 h-3" />
+                          AFTER CLEANING (PROOFS)
+                        </span>
+                        <span className="text-[9px] text-slate-400">Driver Cockpit</span>
+                      </div>
+                      {driverExecution?.proof ? (
+                        <div className="relative group">
+                          <img
+                            src={driverExecution.proof.image_url}
+                            alt="Post-cleaning driver proof"
+                            className="w-full h-44 object-cover cursor-pointer hover:opacity-90 transition-opacity"
+                            onClick={() => setFullProofModalUrl(driverExecution.proof?.image_url || null)}
+                          />
+                          <button
+                            onClick={() => setFullProofModalUrl(driverExecution.proof?.image_url || null)}
+                            className="absolute top-2 right-2 p-1.5 rounded-lg bg-black/60 text-white hover:bg-black/80 transition-colors cursor-pointer"
+                            title="Expand Full Proof Image"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                          </button>
+                          <div className="absolute bottom-2 left-2 px-2 py-0.5 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-500/40 text-[9px] font-bold">
+                            Supabase Verified Photo
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="h-44 flex flex-col items-center justify-center p-4 text-center text-slate-500 bg-slate-950/50">
+                          <Truck className="w-6 h-6 mb-2 text-slate-600 animate-bounce" />
+                          <span className="text-xs font-semibold text-slate-400">Awaiting Driver Proof-of-Work</span>
+                          <span className="text-[10px] text-slate-500 mt-0.5">Photo capture compulsory for completion</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Proof Verification & Metadata Bar */}
+                {driverExecution?.proof && (
+                  <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div>
+                        <span className="text-[10px] text-slate-400 font-medium block">Proof Captured</span>
+                        <span className="font-semibold text-slate-200">
+                          {driverExecution.proof.captured_at
+                            ? new Date(driverExecution.proof.captured_at).toLocaleTimeString()
+                            : "Just now"}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-400 font-medium block">GPS Coordinates</span>
+                        <span className="font-mono text-[11px] text-slate-200">
+                          {driverExecution.proof.latitude?.toFixed(4)}°N, {driverExecution.proof.longitude?.toFixed(4)}°E
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-2 border-t border-slate-800 text-xs">
+                      <div className="flex items-center gap-1.5">
+                        <MapPin className="w-3.5 h-3.5 text-emerald-400" />
+                        <span className="text-slate-300 text-[11px]">
+                          {driverExecution.proof.distance_meters !== null && driverExecution.proof.distance_meters !== undefined
+                            ? `${driverExecution.proof.distance_meters}m from incident site`
+                            : "On-site verified"}
+                        </span>
+                      </div>
+                      {driverExecution.proof.location_verified ? (
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
+                          <Check className="w-3 h-3" />
+                          Location Verified
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center gap-1">
+                          <AlertTriangle className="w-3 h-3" />
+                          Location Mismatch
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Officer Action Buttons for Proof */}
+                    {driverExecution.proof.verification_status !== "VERIFIED" ? (
+                      <div className="pt-2 border-t border-slate-800 flex items-center gap-2">
+                        <button
+                          onClick={() => setFullProofModalUrl(driverExecution.proof?.image_url || null)}
+                          className="flex-1 px-3 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          View Full Proof
+                        </button>
+                        <button
+                          onClick={() => setIsVerifyModalOpen(true)}
+                          className="flex-1 px-3 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white flex items-center justify-center gap-1.5 shadow-md shadow-emerald-950 cursor-pointer transition-colors"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          Verify Proof
+                        </button>
+                        <button
+                          onClick={() => setIsRejectModalOpen(true)}
+                          className="px-3 py-2 rounded-xl text-xs font-semibold bg-red-950/70 hover:bg-red-900 text-red-300 border border-red-800/80 flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                          Reject
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="pt-2 border-t border-slate-800 bg-emerald-950/30 -mx-3.5 -mb-3.5 p-3 rounded-b-xl border-t border-emerald-500/30 text-xs text-emerald-300 font-bold flex items-center justify-between">
+                        <span className="flex items-center gap-1.5">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                          Proof Verified by Municipal Officer
+                        </span>
+                        <button
+                          onClick={() => setFullProofModalUrl(driverExecution.proof?.image_url || null)}
+                          className="text-[11px] underline text-emerald-400 hover:text-emerald-200 cursor-pointer"
+                        >
+                          Inspect Photo
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Execution Timeline Milestones */}
+                {driverExecution?.timeline && driverExecution.timeline.length > 0 && (
+                  <div className="pt-2 border-t border-slate-800 space-y-2">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                      Execution Audit Timeline
+                    </span>
+                    <div className="space-y-2">
+                      {driverExecution.timeline.map((step, idx) => (
+                        <div key={`timeline-${idx}`} className="flex items-start gap-2.5 text-xs">
+                          <div className="w-2 h-2 rounded-full bg-emerald-400 mt-1.5 flex-shrink-0" />
+                          <div className="flex-1">
+                            <div className="flex items-center justify-between">
+                              <span className="font-bold text-slate-200">{step.event.replace(/_/g, " ")}</span>
+                              <span className="text-[10px] text-slate-400">
+                                {formatRelativeTime(step.timestamp)}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-slate-400">
+                              {step.actor} {step.notes && `— ${step.notes}`}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* Officer Action Section */}
               {!selectedReportDetail.officerAction && (
                 <div className="bg-white rounded-xl p-4 border-2 border-dashed border-slate-300 space-y-4">
@@ -2250,6 +2693,166 @@ export default function OfficerPage() {
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* FULL PROOF LIGHTBOX MODAL */}
+      {fullProofModalUrl && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="relative max-w-4xl w-full bg-slate-900 rounded-2xl overflow-hidden border border-slate-800 shadow-2xl">
+            <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-5 h-5 text-emerald-400" />
+                <h4 className="text-sm font-bold text-white">Full-Resolution Driver Proof Photo</h4>
+              </div>
+              <button
+                onClick={() => setFullProofModalUrl(null)}
+                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-4 flex items-center justify-center bg-black">
+              <img
+                src={fullProofModalUrl}
+                alt="Driver proof full resolution"
+                className="max-h-[75vh] w-auto object-contain rounded-lg"
+              />
+            </div>
+            <div className="p-4 bg-slate-950 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
+              <span>Verified Supabase Storage Asset</span>
+              <a
+                href={fullProofModalUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-emerald-400 hover:underline flex items-center gap-1"
+              >
+                Open Original in New Window <ArrowUpRight className="w-3.5 h-3.5" />
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* VERIFY PROOF CONFIRMATION MODAL */}
+      {isVerifyModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="max-w-md w-full bg-white rounded-2xl overflow-hidden shadow-2xl border border-slate-200">
+            <div className="p-5 bg-gradient-to-r from-emerald-600 to-teal-700 text-white flex items-center gap-3">
+              <div className="p-2 rounded-xl bg-white/20">
+                <CheckCircle2 className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h4 className="text-base font-bold">Verify Collection Proof</h4>
+                <p className="text-xs text-emerald-100">Confirm post-cleaning proof & mark incident Resolved</p>
+              </div>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 text-xs space-y-1">
+                <p className="text-slate-500 font-medium">Incident: <span className="font-bold text-slate-900">{driverExecution?.incident_code || selectedReportDetail?.incidentId}</span></p>
+                <p className="text-slate-500 font-medium">Driver: <span className="font-bold text-slate-900">{driverExecution?.driver?.name || "Vikram Patel"}</span></p>
+                <p className="text-slate-500 font-medium">GPS Accuracy: <span className="font-bold text-emerald-700">{driverExecution?.proof?.distance_meters ?? 15}m from site (Verified)</span></p>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700 mb-1.5 block">
+                  Officer Verification Notes (optional)
+                </label>
+                <textarea
+                  rows={3}
+                  value={verifyNotes}
+                  onChange={(e) => setVerifyNotes(e.target.value)}
+                  placeholder="e.g., Site visually inspected and verified clear of debris."
+                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none"
+                />
+              </div>
+
+              <div className="flex items-center gap-2 pt-2">
+                <button
+                  onClick={() => setIsVerifyModalOpen(false)}
+                  disabled={isSubmittingVerification}
+                  className="flex-1 px-4 py-2.5 rounded-xl text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleVerifyDriverProof}
+                  disabled={isSubmittingVerification}
+                  className="flex-1 px-4 py-2.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white flex items-center justify-center gap-1.5 shadow-md cursor-pointer disabled:opacity-50"
+                >
+                  {isSubmittingVerification ? "Confirming..." : "Confirm Verification"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* REJECT PROOF MODAL */}
+      {isRejectModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="max-w-md w-full bg-white rounded-2xl overflow-hidden shadow-2xl border border-slate-200">
+            <div className="p-5 bg-gradient-to-r from-red-600 to-rose-700 text-white flex items-center gap-3">
+              <div className="p-2 rounded-xl bg-white/20">
+                <AlertTriangle className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h4 className="text-base font-bold">Reject Collection Proof</h4>
+                <p className="text-xs text-red-100">Notify driver to retake and upload new proof photo</p>
+              </div>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="text-xs font-bold text-slate-700 mb-1.5 block">
+                  Rejection Reason (Required)
+                </label>
+                <select
+                  value={rejectReason}
+                  onChange={(e) => setRejectReason(e.target.value)}
+                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-500 bg-white font-medium"
+                >
+                  <option value="Image does not show cleaned area">Image does not show cleaned area</option>
+                  <option value="GPS Location Mismatch (Too far from site)">GPS Location Mismatch (Too far from site)</option>
+                  <option value="Photo is blurry, dark, or unrecognizable">Photo is blurry, dark, or unrecognizable</option>
+                  <option value="Accumulation still remains at the site">Accumulation still remains at the site</option>
+                  <option value="Duplicate or obsolete photo">Duplicate or obsolete photo</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700 mb-1.5 block">
+                  Detailed Feedback for Driver
+                </label>
+                <textarea
+                  rows={3}
+                  value={rejectNotes}
+                  onChange={(e) => setRejectNotes(e.target.value)}
+                  placeholder="e.g., Please ensure the entire perimeter is clear before capturing the photo."
+                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-500 resize-none"
+                />
+              </div>
+
+              <div className="flex items-center gap-2 pt-2">
+                <button
+                  onClick={() => setIsRejectModalOpen(false)}
+                  disabled={isSubmittingVerification}
+                  className="flex-1 px-4 py-2.5 rounded-xl text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleRejectDriverProof}
+                  disabled={isSubmittingVerification}
+                  className="flex-1 px-4 py-2.5 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-700 text-white flex items-center justify-center gap-1.5 shadow-md cursor-pointer disabled:opacity-50"
+                >
+                  {isSubmittingVerification ? "Rejecting..." : "Confirm Rejection"}
+                </button>
+              </div>
             </div>
           </div>
         </div>

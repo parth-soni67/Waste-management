@@ -371,6 +371,9 @@ class DriverAssignmentRead(BaseModel):
     category: WasteCategory
     severity_score: Optional[float] = None
     estimated_volume_m3: Optional[float] = None
+    volume_source: str = "AI_ESTIMATE"
+    volume_confidence: float = 0.90
+    report_count: int = 1
     latitude: float
     longitude: float
     address: Optional[str] = None
@@ -383,6 +386,8 @@ class DriverAssignmentRead(BaseModel):
     vehicle_plate: Optional[str] = None
     vehicle_capacity_kg: Optional[float] = None
     vehicle_current_load_kg: Optional[float] = None
+    primary_image_urls: List[str] = Field(default_factory=list)
+    cluster_image_urls: List[str] = Field(default_factory=list)
     citizen_image_urls: List[str] = Field(default_factory=list)
     proof_image_urls: List[str] = Field(default_factory=list)
 
@@ -394,4 +399,83 @@ class DriverAssignmentRead(BaseModel):
 class IncidentCompleteRequest(BaseModel):
     latitude: Optional[float] = Field(None, ge=-90.0, le=90.0)
     longitude: Optional[float] = Field(None, ge=-180.0, le=180.0)
+    notes: Optional[str] = None
+
+
+class DriverExecutionDriverInfo(BaseModel):
+    id: uuid.UUID
+    name: str
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    vehicle_id: Optional[uuid.UUID] = None
+    vehicle_plate: Optional[str] = None
+    vehicle_type: Optional[str] = None
+
+
+class DriverExecutionAssignmentInfo(BaseModel):
+    status: str
+    priority: str
+    assigned_at: Optional[datetime] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    elapsed_minutes: Optional[int] = None
+
+    @field_serializer("assigned_at", "started_at", "completed_at", check_fields=False)
+    def serialize_dates(self, dt: Optional[datetime]) -> Optional[str]:
+        return _serialize_utc_iso(dt)
+
+
+class DriverExecutionProofInfo(BaseModel):
+    id: uuid.UUID
+    image_url: str
+    storage_path: str
+    captured_at: Optional[datetime] = None
+    uploaded_at: datetime
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    accuracy: Optional[float] = None
+    distance_meters: Optional[float] = None
+    location_verified: bool = True
+    verification_status: str
+    notes: Optional[str] = None
+
+    @field_serializer("captured_at", "uploaded_at", check_fields=False)
+    def serialize_dates(self, dt: Optional[datetime]) -> Optional[str]:
+        return _serialize_utc_iso(dt)
+
+
+class ExecutionTimelineMilestone(BaseModel):
+    event: str
+    timestamp: datetime
+    actor: str
+    notes: Optional[str] = None
+
+    @field_serializer("timestamp", check_fields=False)
+    def serialize_dates(self, dt: datetime) -> str:
+        return _serialize_utc_iso(dt) or ""
+
+
+class DriverExecutionResponse(BaseModel):
+    incident_id: uuid.UUID
+    incident_code: str
+    title: str
+    status: str
+    priority: str
+    category: str
+    latitude: float
+    longitude: float
+    address: Optional[str] = None
+    driver: Optional[DriverExecutionDriverInfo] = None
+    assignment: DriverExecutionAssignmentInfo
+    citizen_evidence_urls: List[str] = Field(default_factory=list)
+    proof: Optional[DriverExecutionProofInfo] = None
+    timeline: List[ExecutionTimelineMilestone] = Field(default_factory=list)
+
+
+class OfficerVerifyProofRequest(BaseModel):
+    notes: Optional[str] = None
+
+
+class OfficerRejectProofRequest(BaseModel):
+    reason: str
     notes: Optional[str] = None
