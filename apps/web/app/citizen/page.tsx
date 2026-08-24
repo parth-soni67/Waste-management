@@ -66,6 +66,7 @@ interface CVAnalysis {
   tags: string[];
   recommendedAction: string;
   isFallback: boolean;
+  providerUsed?: string;
   imageUrl?: string;
   storagePath?: string;
 }
@@ -195,6 +196,7 @@ export default function CitizenPage() {
       tags: def.tags,
       recommendedAction: def.action,
       isFallback: true,
+      providerUsed: "fallback",
     });
   };
 
@@ -229,6 +231,7 @@ export default function CitizenPage() {
           tags: Array.isArray(data.detected_tags) ? data.detected_tags : [],
           recommendedAction: data.recommended_action || "Deploy municipal collection vehicle",
           isFallback: Boolean(data.is_fallback),
+          providerUsed: data.provider_used || (data.is_fallback ? "fallback" : "gemini"),
           imageUrl: data.image_url,
           storagePath: data.storage_path,
         });
@@ -713,8 +716,8 @@ export default function CitizenPage() {
                           <span className="font-bold">WasteWise AI Vision Analysis</span>
                         </span>
                         <div className="flex items-center gap-2">
-                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${aiAnalysis.isFallback ? "bg-amber-200/80 text-amber-900 border border-amber-300" : "bg-emerald-200/80 text-emerald-900 border border-emerald-300"}`}>
-                            {aiAnalysis.isFallback ? "Fallback Engine" : "AI Vision Model"}
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${aiAnalysis.providerUsed === "gemini" && !aiAnalysis.isFallback ? "bg-emerald-200/80 text-emerald-900 border border-emerald-300" : "bg-amber-200/80 text-amber-900 border border-amber-300"}`}>
+                            {aiAnalysis.providerUsed === "gemini" && !aiAnalysis.isFallback ? "AI Vision Model" : "Fallback Engine"}
                           </span>
                           <span className="bg-white/80 border border-slate-200 px-2 py-0.5 rounded-full text-[10px] font-medium text-slate-700">
                             {(aiAnalysis.confidence * 100).toFixed(0)}% Confidence

@@ -6,10 +6,16 @@ Loaded from environment variables via Pydantic BaseSettings.
 """
 
 import json
+from pathlib import Path
 from typing import List
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings
+
+# Resolve root .env and local .env
+_BASE_DIR = Path(__file__).resolve().parent.parent.parent.parent
+_ROOT_ENV = _BASE_DIR / ".env"
+_API_ENV = Path(__file__).resolve().parent.parent.parent / ".env"
 
 
 class Settings(BaseSettings):
@@ -58,7 +64,7 @@ class Settings(BaseSettings):
     LLM_PROVIDER: str = "gemini"
     LLM_API_KEY: str = ""
     LLM_MODEL: str = "gemini-2.5-flash"
-    AI_TIMEOUT_SECONDS: float = 25.0
+    AI_TIMEOUT_SECONDS: float = 15.0
 
     # --- Supabase (Auth, Storage & Database) ---
     SUPABASE_URL: str = "https://qjqfziwzaobizdqcmnxq.supabase.co"
@@ -72,7 +78,7 @@ class Settings(BaseSettings):
     UPLOAD_DIR: str = "uploads"
 
     model_config = {
-        "env_file": ".env",
+        "env_file": [str(_ROOT_ENV), str(_API_ENV), ".env"],
         "env_file_encoding": "utf-8",
         "case_sensitive": True,
         "extra": "ignore",

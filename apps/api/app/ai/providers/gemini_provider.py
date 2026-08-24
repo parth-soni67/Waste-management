@@ -27,21 +27,24 @@ ALLOWED_CATEGORIES = {
     "paper",
     "metal",
     "glass",
+    "non_waste",
+    "unknown",
     "other",
 }
 
 SYSTEM_INSTRUCTION = """You are WasteWise AI's specialized municipal Computer Vision engine for Smart India Hackathon 2026.
-You are analyzing the exact municipal waste image provided in this request. Do not use example values. Do not assume the contents of previous requests. Determine all fields exclusively from the current image.
+Analyze only the exact image provided in this request. Do not use generic examples or assume contents of prior requests.
+CRITICAL: If the image does not contain municipal waste (e.g. selfies, indoor portraits, documents, clean streets, animals, nature landscapes without garbage), do NOT force a waste category. Return category="non_waste" or "unknown" with severity_score=0.0, low volume (0.0), and recommended_action="No municipal waste collection required".
 
-Analyze the provided image of municipal waste and return ONLY a valid JSON object matching the following specification:
+Return ONLY a valid JSON object matching the following specification:
 
 {
-  "category": "<one of: mixed, plastic, organic, construction, e_waste, hazardous, paper, metal, glass, other>",
+  "category": "<one of: mixed, plastic, organic, construction, e_waste, hazardous, paper, metal, glass, non_waste, unknown, other>",
   "confidence": <float from 0.0 to 1.0 representing classification confidence for this specific image>,
-  "estimated_volume_m3": <float >= 0.1 representing estimated physical volume in cubic meters from the visible waste pile scale>,
-  "severity_score": <float from 0.0 (minor litter) to 10.0 (critical accumulation/hazard)>,
-  "detected_tags": [<list of 2 to 6 specific strings describing distinct items/materials visible in THIS image, e.g. "pet_bottles", "vegetable_peels", "concrete_rubble">],
-  "recommended_action": "<specific actionable municipal dispatch action, e.g. 'Deploy 5-Tonne Compactor Truck within 2 Hours'>"
+  "estimated_volume_m3": <float >= 0.0 representing estimated physical volume in cubic meters from the visible waste pile scale>,
+  "severity_score": <float from 0.0 (clean/minor litter) to 10.0 (critical accumulation/hazard)>,
+  "detected_tags": [<list of 2 to 6 specific strings describing distinct items/materials visible in THIS image, e.g. "pet_bottles", "vegetable_peels", "concrete_rubble", or "indoor_setting", "person_portrait" for non-waste>],
+  "recommended_action": "<specific actionable municipal dispatch action for this waste category and volume>"
 }
 
 Guidelines:
@@ -51,6 +54,7 @@ Guidelines:
 - For discarded electronics/cables, set category="e_waste".
 - For construction debris/rubble, set category="construction".
 - For mixed street refuse, set category="mixed".
+- For non-waste images, set category="non_waste", severity_score=0.0, estimated_volume_m3=0.0.
 - Return pure JSON without extra conversational preamble or markdown code blocks.
 """
 
@@ -64,7 +68,7 @@ class GeminiVisionProvider(VisionProvider):
         self,
         api_key: str,
         model: str = "gemini-2.5-flash",
-        timeout_seconds: float = 25.0,
+        timeout_seconds: float = 15.0,
     ):
         self.api_key = api_key
         self.model = model or "gemini-2.5-flash"
@@ -82,15 +86,16 @@ class GeminiVisionProvider(VisionProvider):
         if not self.api_key:
             raise ValueError("Gemini API key is not configured")
 
-        logger.info("AI provider selected: gemini")
-        logger.info(f"AI model selected: {self.model}")
-        logger.info("AI analysis started")
+        logger.info(
+            f"AI_GEMINI_REQUEST_STARTED model={self.model} mime_type={mime_type} payload_bytes={len(image_data)}"
+        )
 
         b64_image = base64.b64encode(image_data).decode("utf-8")
 
         prompt = (
             "Analyze the attached municipal waste image and generate the structured JSON assessment. "
-            "Determine all values strictly from the visual contents of this specific image."
+            "Determine all values strictly from the visual contents of this specific image. "
+            "If no municipal waste is visible, classify as non_waste or unknown."
         )
         if hint_category:
             prompt += f" Citizen provided category hint: '{hint_category}'."
@@ -118,33 +123,42 @@ class GeminiVisionProvider(VisionProvider):
             },
         }
 
-        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-            response = await client.post(url, json=payload)
-            if response.status_code != 200:
-                logger.warning(
-                    f"Gemini API returned non-200 status code: {response.status_code}"
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+                response = await client.post(url, json=payload)
+                if response.status_code != 200:
+                    logger.warning(
+                        f"AI_GEMINI_REQUEST_FAILED status_code={response.status_code}"
+                    )
+                    raise RuntimeError(
+                        f"Gemini API error (status {response.status_code})"
+                    )
+
+                res_json = response.json()
+                candidates = res_json.get("candidates", [])
+                if not candidates:
+                    raise ValueError("Gemini returned empty candidates")
+
+                content_parts = candidates[0].get("content", {}).get("parts", [])
+                if not content_parts:
+                    raise ValueError("Gemini candidate has no content parts")
+
+                raw_text = content_parts[0].get("text", "").strip()
+                result = self._parse_and_validate_response(raw_text)
+                logger.info(
+                    f"AI_GEMINI_REQUEST_SUCCESS category={result.category} severity={result.severity_score}"
                 )
-                raise RuntimeError(f"Gemini API error (status {response.status_code})")
-
-            res_json = response.json()
-            candidates = res_json.get("candidates", [])
-            if not candidates:
-                raise ValueError("Gemini returned empty candidates")
-
-            content_parts = candidates[0].get("content", {}).get("parts", [])
-            if not content_parts:
-                raise ValueError("Gemini candidate has no content parts")
-
-            raw_text = content_parts[0].get("text", "").strip()
-            result = self._parse_and_validate_response(raw_text)
-            logger.info("AI analysis completed")
-            return result
+                return result
+        except Exception as e:
+            logger.warning(
+                f"AI_GEMINI_REQUEST_FAILED reason={type(e).__name__}: {str(e)[:150]}"
+            )
+            raise
 
     def _parse_and_validate_response(self, raw_text: str) -> WasteAnalysisResult:
         """
         Sanitize and validate raw AI response into WasteAnalysisResult.
         """
-        # Remove potential markdown code fences ```json ... ```
         cleaned = re.sub(r"^```(?:json)?\s*", "", raw_text, flags=re.MULTILINE)
         cleaned = re.sub(r"\s*```$", "", cleaned, flags=re.MULTILINE).strip()
 
@@ -157,7 +171,7 @@ class GeminiVisionProvider(VisionProvider):
         confidence = max(0.0, min(1.0, confidence))
 
         volume = float(data.get("estimated_volume_m3", 1.5))
-        volume = max(0.1, round(volume, 2))
+        volume = max(0.0, round(volume, 2))
 
         severity = float(data.get("severity_score", 5.0))
         severity = max(0.0, min(10.0, round(severity, 1)))
@@ -186,4 +200,5 @@ class GeminiVisionProvider(VisionProvider):
             detected_tags=detected_tags,
             recommended_action=recommended_action,
             is_fallback=False,
+            provider_used="gemini",
         )

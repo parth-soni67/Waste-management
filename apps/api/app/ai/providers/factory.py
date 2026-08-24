@@ -19,12 +19,16 @@ def get_vision_provider() -> Optional[VisionProvider]:
     """
     api_key = settings.LLM_API_KEY.strip() if settings.LLM_API_KEY else ""
     if not api_key:
+        logger.info(
+            "AI_FACTORY: No LLM_API_KEY configured. Fallback engine will be used."
+        )
         return None
 
     provider_type = (settings.LLM_PROVIDER or "gemini").strip().lower()
-    model = (settings.LLM_MODEL or "gemini-3.6-flash").strip()
+    model = (settings.LLM_MODEL or "gemini-2.5-flash").strip()
 
     if provider_type in ("gemini", "google", "default"):
+        logger.info(f"AI_PROVIDER_SELECTED provider=gemini model={model}")
         return GeminiVisionProvider(
             api_key=api_key,
             model=model,

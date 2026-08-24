@@ -246,6 +246,10 @@ class WasteAnalysisResult(BaseModel):
     is_fallback: bool = Field(
         default=False, description="True if computed via heuristic fallback engine"
     )
+    provider_used: str = Field(
+        default="fallback",
+        description="Provider that executed the inference ('gemini' or 'fallback')",
+    )
     image_url: Optional[str] = Field(
         default=None, description="Persisted Supabase Storage public URL"
     )

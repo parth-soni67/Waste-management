@@ -3,11 +3,11 @@ WasteWise AI — Computer Vision & Waste Classification Service
 Source of truth: program_spec.md §4.2 & ai_rules.md #7
 
 Analyzes waste imagery to:
-1. Detect and classify primary waste category (Mixed, Plastic, Organic, Construction, E-Waste, Hazardous, Paper, Metal, Glass, Other).
+1. Detect and classify primary waste category (Mixed, Plastic, Organic, Construction, E-Waste, Hazardous, Paper, Metal, Glass, Non_Waste, Other).
 2. Estimate accumulation volume (m³) and severity score (0.0 to 10.0).
 3. Generate contextual tags and recommended municipal dispatch action.
 4. Multimodal Vision Provider integration (e.g. Gemini Vision model) with safe heuristic fallback.
-5. Non-AI Heuristic Fallback Path ensures the demo never breaks if an external model is unavailable.
+5. Non-AI Heuristic Fallback Path ensures the system remains robust if an external model is unavailable.
 """
 
 import hashlib
@@ -106,6 +106,10 @@ class ComputerVisionService:
         Analyze an image for waste classification and severity estimation.
         Attempts real Vision Provider first, gracefully executes heuristic fallback path on error or missing config.
         """
+        logger.info(
+            f"AI_REQUEST_RECEIVED mime_type={mime_type} payload_bytes={len(image_data) if image_data else 0} hint={hint_category}"
+        )
+
         provider = get_vision_provider()
         if provider and image_data:
             try:
@@ -115,16 +119,17 @@ class ComputerVisionService:
                     hint_category=hint_category,
                 )
                 logger.info(
-                    f"Successfully analyzed image using Vision AI Provider. "
-                    f"Category: {result.category}, Severity: {result.severity_score}, Tags: {result.detected_tags}"
+                    f"AI_GEMINI_REQUEST_SUCCESS category={result.category}, "
+                    f"severity={result.severity_score}, tags={result.detected_tags}, provider={result.provider_used}"
                 )
                 return result
             except Exception as e:
                 logger.warning(
-                    f"Vision AI Provider call failed: {type(e).__name__}. "
-                    f"Engaging deterministic heuristic fallback engine."
+                    f"AI_GEMINI_REQUEST_FAILED error_type={type(e).__name__}. "
+                    f"Engaging fallback engine."
                 )
 
+        logger.info("AI_FALLBACK_USED reason=provider_unavailable_or_error")
         # Execute deterministic heuristic fallback path per ai_rules.md #7
         return cls._execute_heuristic_analysis(
             image_data=image_data,
@@ -143,7 +148,6 @@ class ComputerVisionService:
         Deterministic, robust heuristic fallback path analyzing image signatures & hints.
         Produces genuine image-specific variation based on full payload characteristics.
         """
-        # Generate distinct deterministic seed from full image content
         seed_str = (image_url or "") + (hint_category or "")
         if image_data:
             seed_str += hashlib.sha256(image_data).hexdigest()
@@ -204,4 +208,5 @@ class ComputerVisionService:
             detected_tags=detected_tags,
             recommended_action=action,
             is_fallback=True,
+            provider_used="fallback",
         )
