@@ -17,9 +17,12 @@ import {
   ChevronRight,
   Eye,
   Layers,
-  X
+  X,
+  User,
+  LogOut,
 } from "lucide-react";
 import Link from "next/link";
+import { useAuth } from "@/lib/auth-context";
 
 interface CitizenReport {
   id: string;
@@ -66,6 +69,7 @@ interface CVAnalysis {
 }
 
 export default function CitizenPage() {
+  const { user, logout, getAuthHeaders } = useAuth();
   const [activeTab, setActiveTab] = useState<"report" | "history">("report");
   const [images, setImages] = useState<string[]>([]);
   const [category, setCategory] = useState("mixed");
@@ -290,7 +294,9 @@ export default function CitizenPage() {
     const fetchPersistedReports = async () => {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
       try {
-        const res = await fetch(`${apiUrl}/api/v1/reports`);
+        const res = await fetch(`${apiUrl}/api/v1/reports`, {
+          headers: getAuthHeaders(),
+        });
         if (res.ok) {
           const data: BackendReportItem[] = await res.json();
           if (Array.isArray(data) && data.length > 0) {
@@ -319,7 +325,7 @@ export default function CitizenPage() {
       void fetchPersistedReports();
     }, 0);
     return () => clearTimeout(timer);
-  }, []);
+  }, [getAuthHeaders]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -345,6 +351,7 @@ export default function CitizenPage() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          ...getAuthHeaders(),
         },
         body: JSON.stringify(reportPayload),
       });
@@ -483,6 +490,20 @@ export default function CitizenPage() {
           </div>
 
           <div className="flex items-center gap-3">
+            {user && (
+              <div className="flex items-center gap-1.5 bg-white px-2.5 py-1.5 rounded-xl border border-slate-200 shadow-sm text-xs">
+                <User className="w-3.5 h-3.5 text-slate-500" />
+                <span className="font-bold text-slate-700 text-[11px]">{user.fullName.split(' ')[0]}</span>
+                <button
+                  onClick={() => logout()}
+                  title="Sign out"
+                  className="text-slate-400 hover:text-red-600 transition-colors p-0.5 ml-1 cursor-pointer"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+
             <div className="flex bg-white rounded-xl p-1 border border-slate-200 shadow-sm text-xs font-semibold">
               <button
                 onClick={() => {

@@ -17,8 +17,12 @@ import {
   Route,
   ShieldCheck,
   ImagePlus,
+  LogOut,
+  Lock,
+  User,
 } from "lucide-react";
 import Link from "next/link";
+import { useAuth } from "@/lib/auth-context";
 
 interface DriverTask {
   id: string;
@@ -44,6 +48,7 @@ interface BackendIncidentItem {
 }
 
 export default function DriverPage() {
+  const { user, logout, getAuthHeaders, isLoading } = useAuth();
   const [currentLoad, setCurrentLoad] = useState(2450);
   const maxCapacity = 5000;
   const [hasRerouteAlert, setHasRerouteAlert] = useState(true);
@@ -60,7 +65,9 @@ export default function DriverPage() {
     const fetchDriverTasks = async () => {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
       try {
-        const res = await fetch(`${apiUrl}/api/v1/incidents`);
+        const res = await fetch(`${apiUrl}/api/v1/incidents`, {
+          headers: getAuthHeaders(),
+        });
         if (res.ok) {
           const data: BackendIncidentItem[] = await res.json();
           if (Array.isArray(data) && data.length > 0) {
@@ -86,7 +93,7 @@ export default function DriverPage() {
       void fetchDriverTasks();
     }, 0);
     return () => clearTimeout(timer);
-  }, []);
+  }, [getAuthHeaders]);
 
   const activeTask = tasks.find((t) => t.status !== "COMPLETED") || tasks[0];
 
@@ -113,7 +120,7 @@ export default function DriverPage() {
       const dbStatus = newStatus === "COMPLETED" ? "COLLECTED" : newStatus === "COLLECTING" || newStatus === "ARRIVED" ? "IN_PROGRESS" : "ASSIGNED";
       await fetch(`${apiUrl}/api/v1/incidents/${activeTask.incidentId.replace("WW-", "")}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
         body: JSON.stringify({ status: dbStatus }),
       });
     } catch {}
@@ -127,10 +134,36 @@ export default function DriverPage() {
 
   const loadPercentage = Math.round((currentLoad / maxCapacity) * 100);
 
-  if (!mounted) {
+  if (!mounted || isLoading) {
     return (
       <div className="min-h-screen bg-[var(--color-canvas)] p-8 flex items-center justify-center">
-        <div className="animate-pulse text-sm text-slate-500 font-medium">Loading Driver Cockpit...</div>
+        <div className="animate-pulse text-sm text-slate-500 font-medium">Authenticating Driver Cockpit...</div>
+      </div>
+    );
+  }
+
+  // Server-side RBAC Guard: Only Driver and Admin roles can view this surface
+  if (!user || (user.role !== "driver" && user.role !== "admin")) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4 bg-[var(--color-canvas)]">
+        <div className="max-w-md w-full bg-white rounded-2xl p-8 border border-slate-200 shadow-sm text-center">
+          <div className="w-12 h-12 rounded-xl bg-teal-50 text-teal-700 flex items-center justify-center mx-auto mb-4 border border-teal-200">
+            <Lock className="w-6 h-6" />
+          </div>
+          <h2 className="text-lg font-bold mb-2">Driver Access Required</h2>
+          <p className="text-xs text-slate-500 mb-6 leading-relaxed">
+            {!user
+              ? "You must be signed in with an authorized Municipal Driver credential to access the driver collection route and telemetry."
+              : `Access Denied: Your current role is '${user.role.toUpperCase()}'. Only Municipal Fleet Drivers & Admins have driver cockpit access.`}
+          </p>
+          <Link
+            href="/"
+            className="inline-flex items-center justify-center gap-2 w-full py-2.5 px-4 rounded-xl text-xs font-bold text-white shadow-sm hover:opacity-90 transition-all cursor-pointer"
+            style={{ backgroundColor: "var(--color-primary)" }}
+          >
+            Go to Authentication Portal
+          </Link>
+        </div>
       </div>
     );
   }
@@ -157,9 +190,24 @@ export default function DriverPage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-bold">
-          <span className="w-2 h-2 rounded-full bg-emerald-600 animate-ping" />
-          <span>Loop C Live Nav</span>
+        <div className="flex items-center gap-2">
+          {/* User Profile & Logout */}
+          <div className="flex items-center gap-1.5 bg-white px-2.5 py-1 rounded-xl border border-slate-200 shadow-sm text-xs">
+            <User className="w-3 h-3 text-slate-500" />
+            <span className="font-bold text-slate-700 text-[11px]">{user.fullName.split(' ')[0]}</span>
+            <button
+              onClick={() => logout()}
+              title="Sign out"
+              className="text-slate-400 hover:text-red-600 transition-colors p-0.5 ml-0.5 cursor-pointer"
+            >
+              <LogOut className="w-3 h-3" />
+            </button>
+          </div>
+
+          <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 text-[11px] font-bold">
+            <span className="w-2 h-2 rounded-full bg-emerald-600 animate-ping" />
+            <span>Loop C</span>
+          </div>
         </div>
       </div>
 

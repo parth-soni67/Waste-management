@@ -44,8 +44,11 @@ import {
   Edit2,
   Trash2,
   Wrench,
+  LogOut,
+  Lock,
 } from "lucide-react";
 import Link from "next/link";
+import { useAuth } from "@/lib/auth-context";
 import type { MapPoint } from "@/components/map/MapLibreView";
 
 // Dynamically import MapLibre for SSR safety
@@ -150,6 +153,7 @@ interface CitizenReportDetail {
 }
 
 export default function OfficerPage() {
+  const { user, logout, getAuthHeaders, isLoading } = useAuth();
   const [filterPriority, setFilterPriority] = useState<string>("ALL");
   const [filterTime, setFilterTime] = useState<string>("LATEST");
   const [filterZone, setFilterZone] = useState<string>("ALL");
@@ -334,7 +338,9 @@ export default function OfficerPage() {
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
     try {
       // 1. Fetch Incidents from Supabase DB
-      const resIncidents = await fetch(`${apiUrl}/api/v1/incidents`);
+      const resIncidents = await fetch(`${apiUrl}/api/v1/incidents`, {
+        headers: getAuthHeaders(),
+      });
       if (resIncidents.ok) {
         const data: BackendIncidentItem[] = await resIncidents.json();
         if (Array.isArray(data) && data.length > 0) {
@@ -368,7 +374,9 @@ export default function OfficerPage() {
       }
 
       // 2. Fetch Reports from Supabase DB
-      const resReports = await fetch(`${apiUrl}/api/v1/reports`);
+      const resReports = await fetch(`${apiUrl}/api/v1/reports`, {
+        headers: getAuthHeaders(),
+      });
       if (resReports.ok) {
         const repData: BackendReportItem[] = await resReports.json();
         if (Array.isArray(repData) && repData.length > 0) {
@@ -397,7 +405,9 @@ export default function OfficerPage() {
       }
 
       // 3. Fetch Vehicles from Supabase DB
-      const resVehicles = await fetch(`${apiUrl}/api/v1/vehicles`);
+      const resVehicles = await fetch(`${apiUrl}/api/v1/vehicles`, {
+        headers: getAuthHeaders(),
+      });
       if (resVehicles.ok) {
         const vehData = await resVehicles.json();
         if (Array.isArray(vehData) && vehData.length > 0) {
@@ -419,7 +429,7 @@ export default function OfficerPage() {
     } catch (e) {
       console.warn("Could not connect to Supabase backend", e);
     }
-  }, []);
+  }, [getAuthHeaders]);
 
   useEffect(() => {
     // Initial fetch on mount via timer to avoid setState directly in effect
@@ -875,10 +885,36 @@ export default function OfficerPage() {
     () => false
   );
 
-  if (!mounted) {
+  if (!mounted || isLoading) {
     return (
       <div className="min-h-screen bg-[var(--color-canvas)] p-8 flex items-center justify-center">
-        <div className="animate-pulse text-sm text-slate-500 font-medium">Loading Command Center...</div>
+        <div className="animate-pulse text-sm text-slate-500 font-medium">Authenticating Command Center...</div>
+      </div>
+    );
+  }
+
+  // Server-side RBAC Guard: Only Officer and Admin roles can view this surface
+  if (!user || (user.role !== "officer" && user.role !== "admin")) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4 bg-[var(--color-canvas)]">
+        <div className="max-w-md w-full bg-white rounded-2xl p-8 border border-slate-200 shadow-sm text-center">
+          <div className="w-12 h-12 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center mx-auto mb-4 border border-amber-200">
+            <Lock className="w-6 h-6" />
+          </div>
+          <h2 className="text-lg font-bold mb-2">Officer Access Required</h2>
+          <p className="text-xs text-slate-500 mb-6 leading-relaxed">
+            {!user
+              ? "You must be signed in with an authorized Municipal Officer credential to access the Command Center."
+              : `Access Denied: Your current role is '${user.role.toUpperCase()}'. Only Municipal Officers & Admins have command privileges.`}
+          </p>
+          <Link
+            href="/"
+            className="inline-flex items-center justify-center gap-2 w-full py-2.5 px-4 rounded-xl text-xs font-bold text-white shadow-sm hover:opacity-90 transition-all cursor-pointer"
+            style={{ backgroundColor: "var(--color-primary)" }}
+          >
+            Go to Authentication Portal
+          </Link>
+        </div>
       </div>
     );
   }
@@ -914,6 +950,22 @@ export default function OfficerPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
+          {/* User Profile Badge & Logout */}
+          <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-sm">
+            <User className="w-3.5 h-3.5 text-slate-500" />
+            <div className="flex flex-col text-left">
+              <span className="text-[11px] font-bold text-slate-800 line-clamp-1">{user.fullName}</span>
+              <span className="text-[9px] font-semibold text-emerald-700 uppercase tracking-wider">{user.role}</span>
+            </div>
+            <button
+              onClick={() => logout()}
+              title="Sign out"
+              className="p-1 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-red-600 transition-colors ml-1 cursor-pointer"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
           {/* Add Vehicle / Driver Button */}
           <button
             onClick={() => setIsAddModalOpen(true)}

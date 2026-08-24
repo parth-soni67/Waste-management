@@ -2,13 +2,15 @@
 
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowRight, KeyRound, Sparkles, AlertCircle, CheckCircle2, ShieldCheck, Truck, UserCheck } from "lucide-react";
+import { ArrowRight, Sparkles, AlertCircle, CheckCircle2, ShieldCheck, Truck, UserCheck } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useAuth } from "@/lib/auth-context";
 
 type AuthMode = "signin" | "signup" | "forgot";
 
 export default function AuthCard() {
   const router = useRouter();
+  const { login, register } = useAuth();
   const [mode, setMode] = useState<AuthMode>("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -18,21 +20,41 @@ export default function AuthCard() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  // Demo accounts for fast evaluation
-  const handleQuickDemo = (role: "citizen" | "driver" | "officer" | "admin") => {
+  // Demo accounts for fast evaluation (calls real backend auth API)
+  const handleQuickDemo = async (role: "citizen" | "driver" | "officer" | "admin") => {
     setErrorMessage(null);
-    if (role === "citizen") {
-      setEmail("citizen@wastewise.gov");
-      setPassword("citizenPass123!");
-    } else if (role === "driver") {
-      setEmail("driver@wastewise.gov");
-      setPassword("driverPass123!");
+    setSuccessMessage(null);
+    let demoEmail = "citizen@wastewise.gov";
+    let demoPass = "citizenPass123!";
+
+    if (role === "driver") {
+      demoEmail = "driver@wastewise.gov";
+      demoPass = "driverPass123!";
     } else if (role === "officer") {
-      setEmail("officer@wastewise.gov");
-      setPassword("officerPass123!");
+      demoEmail = "officer@wastewise.gov";
+      demoPass = "officerPass123!";
     } else if (role === "admin") {
-      setEmail("admin@wastewise.gov");
-      setPassword("adminPass123!");
+      demoEmail = "admin@wastewise.gov";
+      demoPass = "adminPass123!";
+    }
+
+    setEmail(demoEmail);
+    setPassword(demoPass);
+    setLoading(true);
+
+    try {
+      const authUser = await login(demoEmail, demoPass);
+      if (authUser.role === "driver") {
+        router.push("/driver");
+      } else if (authUser.role === "officer" || authUser.role === "admin") {
+        router.push("/officer");
+      } else {
+        router.push("/citizen");
+      }
+    } catch (err: unknown) {
+      setErrorMessage(err instanceof Error ? err.message : "Authentication failed");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -43,23 +65,24 @@ export default function AuthCard() {
     setLoading(true);
 
     try {
-      // Direct navigation to appropriate surface based on role / demo email
       if (mode === "signin") {
-        if (email.includes("driver")) {
+        const authUser = await login(email, password);
+        if (authUser.role === "driver") {
           router.push("/driver");
-        } else if (email.includes("officer") || email.includes("admin")) {
+        } else if (authUser.role === "officer" || authUser.role === "admin") {
           router.push("/officer");
         } else {
           router.push("/citizen");
         }
       } else if (mode === "signup") {
+        await register(email, password, fullName, phone);
         setSuccessMessage("Account created successfully! Redirecting to citizen portal...");
         setTimeout(() => router.push("/citizen"), 1000);
       } else {
         setSuccessMessage("Password reset link has been dispatched to your email.");
       }
-    } catch {
-      setErrorMessage("Invalid email or password");
+    } catch (err: unknown) {
+      setErrorMessage(err instanceof Error ? err.message : "Invalid email or password");
     } finally {
       setLoading(false);
     }
@@ -278,21 +301,17 @@ export default function AuthCard() {
           <div className="mt-4 pt-4 border-t border-slate-100">
             <button
               type="button"
-              onClick={() => {
-                setEmail("citizen@wastewise.gov");
-                setPassword("passkeyAuth");
-                router.push("/citizen");
-              }}
+              onClick={() => void handleQuickDemo("citizen")}
               className="w-full py-2 px-3 rounded-lg text-xs font-medium border flex items-center justify-center gap-2 transition-colors hover:bg-slate-50 cursor-pointer text-slate-700"
               style={{ borderColor: "rgba(20, 32, 26, 0.15)" }}
             >
-              <KeyRound className="w-3.5 h-3.5 text-slate-500" />
-              <span>Sign in with Passkey / WebAuthn</span>
+              <UserCheck className="w-3.5 h-3.5 text-slate-500" />
+              <span>Instant Passkey Access (Citizen)</span>
             </button>
           </div>
         )}
 
-        {/* Demo Fast-Switch Buttons (Evaluation Aid) */}
+        {/* Demo Fast-Switch Buttons (Evaluation Aid — Real Database Authentication) */}
         <div className="mt-5 pt-4 border-t border-slate-100">
           <div className="flex items-center justify-between mb-2">
             <span className="text-[11px] font-semibold tracking-wide uppercase text-slate-500 flex items-center gap-1">
@@ -302,31 +321,25 @@ export default function AuthCard() {
           <div className="grid grid-cols-3 gap-1.5">
             <button
               type="button"
-              onClick={() => {
-                handleQuickDemo("citizen");
-                router.push("/citizen");
-              }}
-              className="py-1.5 px-2 rounded-md text-[11px] font-medium bg-[#F0EBE1] hover:bg-[#E5DEC] text-slate-800 transition-colors flex items-center justify-center gap-1 cursor-pointer"
+              disabled={loading}
+              onClick={() => void handleQuickDemo("citizen")}
+              className="py-1.5 px-2 rounded-md text-[11px] font-medium bg-[#F0EBE1] hover:bg-[#E5DEC4] text-slate-800 transition-colors flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50"
             >
               <UserCheck className="w-3 h-3 text-emerald-700" /> Citizen
             </button>
             <button
               type="button"
-              onClick={() => {
-                handleQuickDemo("driver");
-                router.push("/driver");
-              }}
-              className="py-1.5 px-2 rounded-md text-[11px] font-medium bg-[#F0EBE1] hover:bg-[#E5DEC] text-slate-800 transition-colors flex items-center justify-center gap-1 cursor-pointer"
+              disabled={loading}
+              onClick={() => void handleQuickDemo("driver")}
+              className="py-1.5 px-2 rounded-md text-[11px] font-medium bg-[#F0EBE1] hover:bg-[#E5DEC4] text-slate-800 transition-colors flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50"
             >
               <Truck className="w-3 h-3 text-teal-700" /> Driver
             </button>
             <button
               type="button"
-              onClick={() => {
-                handleQuickDemo("officer");
-                router.push("/officer");
-              }}
-              className="py-1.5 px-2 rounded-md text-[11px] font-medium bg-[#F0EBE1] hover:bg-[#E5DEC] text-slate-800 transition-colors flex items-center justify-center gap-1 cursor-pointer"
+              disabled={loading}
+              onClick={() => void handleQuickDemo("officer")}
+              className="py-1.5 px-2 rounded-md text-[11px] font-medium bg-[#F0EBE1] hover:bg-[#E5DEC4] text-slate-800 transition-colors flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50"
             >
               <ShieldCheck className="w-3 h-3 text-amber-700" /> Officer
             </button>

@@ -282,7 +282,7 @@ async def update_incident(
     incident_id: uuid.UUID,
     payload: IncidentUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: TokenPayload = Depends(require_role("officer", "admin")),
+    current_user: TokenPayload = Depends(require_role("officer", "admin", "driver")),
 ):
     """Officer updates incident priority, assignment, or status with PostgreSQL persistence."""
     stmt = select(Incident).where(Incident.id == incident_id)
