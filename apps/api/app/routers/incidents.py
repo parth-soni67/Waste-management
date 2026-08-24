@@ -5,17 +5,22 @@ Implements duplicate report clustering and dynamic priority engine integration.
 
 import uuid
 from typing import List, Optional
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
-from app.core.security import get_current_user, require_role, TokenPayload
-from app.models.entities import Incident, Report, IncidentStatus, PriorityLevel, WasteCategory
+from app.core.security import TokenPayload, get_current_user, require_role
+from app.models.entities import (
+    Incident,
+    IncidentStatus,
+    PriorityLevel,
+    Report,
+)
 from app.schemas.all_schemas import (
-    IncidentCreate,
-    IncidentUpdate,
     IncidentRead,
+    IncidentUpdate,
     ReportCreate,
     ReportRead,
 )
@@ -79,7 +84,11 @@ async def list_my_reports(
     current_user: TokenPayload = Depends(get_current_user),
 ):
     """List reports submitted by the currently authenticated citizen (IDOR-safe)."""
-    stmt = select(Report).where(Report.user_id == uuid.UUID(current_user.sub)).order_by(Report.created_at.desc())
+    stmt = (
+        select(Report)
+        .where(Report.user_id == uuid.UUID(current_user.sub))
+        .order_by(Report.created_at.desc())
+    )
     res = await db.execute(stmt)
     return res.scalars().all()
 
@@ -120,7 +129,9 @@ async def update_incident(
     inc = res.scalar_one_or_none()
 
     if not inc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found"
+        )
 
     if payload.priority is not None:
         inc.priority = payload.priority

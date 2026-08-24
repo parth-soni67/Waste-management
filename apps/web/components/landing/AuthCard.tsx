@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ArrowRight, KeyRound, Sparkles, AlertCircle, CheckCircle2, ShieldCheck, Truck, UserCheck } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -9,13 +9,8 @@ type AuthMode = "signin" | "signup" | "forgot";
 
 export default function AuthCard() {
   const router = useRouter();
-  const [mounted, setMounted] = useState(false);
   const [mode, setMode] = useState<AuthMode>("signin");
   const [email, setEmail] = useState("");
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");

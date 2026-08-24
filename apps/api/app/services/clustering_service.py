@@ -10,17 +10,23 @@ based on:
 """
 
 import math
-import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 
-from sqlalchemy import select, and_
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.entities import Incident, Report, IncidentStatus, PriorityLevel, WasteCategory
+from app.models.entities import (
+    Incident,
+    IncidentStatus,
+    PriorityLevel,
+    WasteCategory,
+)
 
 
-def haversine_distance_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+def haversine_distance_meters(
+    lat1: float, lon1: float, lat2: float, lon2: float
+) -> float:
     """Calculate the great-circle distance between two points in meters."""
     R = 6371000.0  # Earth radius in meters
     phi1, phi2 = math.radians(lat1), math.radians(lat2)
@@ -53,12 +59,20 @@ class DuplicateClusteringService:
         Evaluate if a new report matches an existing incident within 100m in the last 24h.
         Returns (Incident, is_merged: bool).
         """
-        time_cutoff = datetime.now(timezone.utc) - timedelta(hours=cls.TIME_WINDOW_HOURS)
+        time_cutoff = datetime.now(timezone.utc) - timedelta(
+            hours=cls.TIME_WINDOW_HOURS
+        )
 
         # Query all active incidents (not closed or verified) created/updated recently
         stmt = select(Incident).where(
             and_(
-                Incident.status.in_([IncidentStatus.REPORTED, IncidentStatus.ASSIGNED, IncidentStatus.IN_PROGRESS]),
+                Incident.status.in_(
+                    [
+                        IncidentStatus.REPORTED,
+                        IncidentStatus.ASSIGNED,
+                        IncidentStatus.IN_PROGRESS,
+                    ]
+                ),
                 Incident.created_at >= time_cutoff,
             )
         )
@@ -69,7 +83,9 @@ class DuplicateClusteringService:
         min_distance = float("inf")
 
         for inc in active_incidents:
-            dist = haversine_distance_meters(report_lat, report_lng, inc.latitude, inc.longitude)
+            dist = haversine_distance_meters(
+                report_lat, report_lng, inc.latitude, inc.longitude
+            )
             if dist <= cls.CLUSTER_THRESHOLD_METERS and dist < min_distance:
                 min_distance = dist
                 closest_incident = inc
@@ -78,8 +94,12 @@ class DuplicateClusteringService:
             # Merge report into existing incident!
             n = closest_incident.report_count
             # Update running centroid
-            closest_incident.latitude = (closest_incident.latitude * n + report_lat) / (n + 1)
-            closest_incident.longitude = (closest_incident.longitude * n + report_lng) / (n + 1)
+            closest_incident.latitude = (closest_incident.latitude * n + report_lat) / (
+                n + 1
+            )
+            closest_incident.longitude = (
+                closest_incident.longitude * n + report_lng
+            ) / (n + 1)
             closest_incident.report_count += 1
             closest_incident.updated_at = datetime.now(timezone.utc)
 

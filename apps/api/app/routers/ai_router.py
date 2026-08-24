@@ -4,17 +4,36 @@ Endpoints for Computer Vision analysis, Hotspot predictions, and Priority Engine
 """
 
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.cv_service import ComputerVisionService
+from app.ai.hotspot_service import HotspotPrediction, HotspotPredictionService
+from app.core.config import settings
 from app.core.db import get_db
-from app.core.security import get_current_user, require_role, TokenPayload
-from app.ai.cv_service import ComputerVisionService, WasteAnalysisResult
-from app.ai.hotspot_service import HotspotPredictionService, HotspotPrediction
+from app.core.security import TokenPayload, get_optional_user, require_role
+from app.schemas.all_schemas import WasteAnalysisResult
 from app.services.priority_engine import DynamicPriorityEngine
 
 router = APIRouter()
+
+
+def detect_image_mime_type(contents: bytes) -> Optional[str]:
+    """
+    Inspect magic bytes to validate image formats per security_guide.md §3.
+    Supports JPEG, PNG, and WEBP.
+    """
+    if len(contents) < 12:
+        return None
+    if contents.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if contents.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if contents[:4] == b"RIFF" and contents[8:12] == b"WEBP":
+        return "image/webp"
+    return None
 
 
 class AnalyzeImageRequest(BaseModel):
@@ -25,7 +44,7 @@ class AnalyzeImageRequest(BaseModel):
 @router.post("/analyze-image", response_model=WasteAnalysisResult)
 async def analyze_waste_image(
     payload: AnalyzeImageRequest,
-    current_user: TokenPayload = Depends(get_current_user),
+    current_user: Optional[TokenPayload] = Depends(get_optional_user),
 ):
     """
     Computer Vision: Classify waste type, estimate volume (m³), and calculate severity score.
@@ -42,20 +61,40 @@ async def analyze_waste_image(
 async def analyze_waste_image_file(
     file: UploadFile = File(...),
     hint_category: Optional[str] = Form(None),
-    current_user: TokenPayload = Depends(get_current_user),
+    current_user: Optional[TokenPayload] = Depends(get_optional_user),
 ):
     """
     Analyze directly uploaded image file with MIME sniffing and size validation per security_guide.md §3.
+    Supports JPEG, PNG, and WEBP images.
     """
     contents = await file.read()
-    if len(contents) > 10 * 1024 * 1024:
+    if not contents:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="File size exceeds 10MB limit",
+            detail="Uploaded file is empty",
         )
+
+    max_bytes = settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024
+    if len(contents) > max_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"File size exceeds {settings.MAX_UPLOAD_SIZE_MB}MB limit",
+        )
+
+    mime_type = detect_image_mime_type(contents)
+    if not mime_type:
+        # Fallback check file content_type if sniffing needs extension hint or reject
+        if file.content_type in ("image/jpeg", "image/png", "image/webp"):
+            mime_type = file.content_type
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Unsupported image format. Allowed formats: JPEG, PNG, WEBP",
+            )
 
     result = await ComputerVisionService.analyze_image(
         image_data=contents,
+        mime_type=mime_type,
         hint_category=hint_category,
     )
     return result

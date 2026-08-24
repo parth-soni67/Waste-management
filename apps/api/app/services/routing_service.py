@@ -6,8 +6,10 @@ Computes optimal multi-stop collection sequences, inserting P0/P1 emergencies dy
 and calculating total distance, travel time, and polyline coordinates.
 """
 
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List
+
 from pydantic import BaseModel
+
 from app.services.clustering_service import haversine_distance_meters
 
 
@@ -34,7 +36,11 @@ class OptimizedRoute(BaseModel):
 
 
 class DynamicRouteOptimizer:
-    DISPOSAL_FACILITY = {"name": "Gandhinagar Solid Waste Processing Facility", "lat": 23.060, "lng": 72.535}
+    DISPOSAL_FACILITY = {
+        "name": "Gandhinagar Solid Waste Processing Facility",
+        "lat": 23.060,
+        "lng": 72.535,
+    }
 
     @classmethod
     def optimize_vehicle_route(
@@ -59,7 +65,11 @@ class DynamicRouteOptimizer:
         unvisited = list(routine_stops)
 
         while unvisited:
-            unvisited.sort(key=lambda x: haversine_distance_meters(curr_lat, curr_lng, x["lat"], x["lng"]))
+            unvisited.sort(
+                key=lambda x: haversine_distance_meters(
+                    curr_lat, curr_lng, x["lat"], x["lng"]
+                )
+            )
             next_stop = unvisited.pop(0)
             ordered_routine.append(next_stop)
             curr_lat, curr_lng = next_stop["lat"], next_stop["lng"]
@@ -95,14 +105,18 @@ class DynamicRouteOptimizer:
             c_lat, c_lng = inc["lat"], inc["lng"]
 
         # Add Final Leg to Disposal Facility
-        d_dump_m = haversine_distance_meters(c_lat, c_lng, cls.DISPOSAL_FACILITY["lat"], cls.DISPOSAL_FACILITY["lng"])
+        d_dump_m = haversine_distance_meters(
+            c_lat, c_lng, cls.DISPOSAL_FACILITY["lat"], cls.DISPOSAL_FACILITY["lng"]
+        )
         total_dist_m += d_dump_m
         waypoints.append([cls.DISPOSAL_FACILITY["lng"], cls.DISPOSAL_FACILITY["lat"]])
         cumulative_mins += max(5, int((d_dump_m / 1000.0) * 2.2))
 
         total_km = round(total_dist_m / 1000.0, 2)
         # Environmental impact estimates (SDG 11 & SDG 12)
-        fuel_saved = round(total_km * 0.18, 2)  # ~18% dynamic optimization saving vs baseline
+        fuel_saved = round(
+            total_km * 0.18, 2
+        )  # ~18% dynamic optimization saving vs baseline
         co2_avoided = round(fuel_saved * 2.68, 2)  # 2.68 kg CO2 per liter diesel
 
         return OptimizedRoute(

@@ -39,6 +39,7 @@ interface CVAnalysis {
   severityScore: number;
   tags: string[];
   recommendedAction: string;
+  isFallback: boolean;
 }
 
 export default function CitizenPage() {
@@ -54,6 +55,7 @@ export default function CitizenPage() {
   const [isLocating, setIsLocating] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [analyzingImage, setAnalyzingImage] = useState(false);
+  const [analysisStatusText, setAnalysisStatusText] = useState<string>("");
   const [aiAnalysis, setAiAnalysis] = useState<CVAnalysis | null>(null);
   const [submittedReport, setSubmittedReport] = useState<CitizenReport | null>(null);
   const [resolutionFeedback, setResolutionFeedback] = useState<Record<string, { response: string; count: number }>>({});
@@ -92,11 +94,12 @@ export default function CitizenPage() {
     },
   ]);
 
-  // --- Live Camera Capture Logic ---
+  // --- Live Camera & File Upload Logic ---
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const startCamera = async () => {
     setIsCameraActive(true);
@@ -110,7 +113,7 @@ export default function CitizenPage() {
       }
     } catch (err) {
       console.error("Error accessing camera:", err);
-      alert("Could not access the camera. Please ensure you have given camera permissions.");
+      alert("Could not access the camera. Please ensure camera permissions or use the file upload option.");
       setIsCameraActive(false);
     }
   };
@@ -123,35 +126,110 @@ export default function CitizenPage() {
     setIsCameraActive(false);
   };
 
+  const executeClientFallback = (hintCat?: string) => {
+    const catMap: Record<string, string> = {
+      plastic: "Plastic & Polymer Packaging",
+      organic: "Organic / Market Biomass",
+      construction: "Construction & Demolition Debris",
+      e_waste: "Electronic / Electrical Waste",
+      hazardous: "Hazardous / Bio-Medical Waste",
+      mixed: "Mixed Municipal Solid Waste",
+    };
+    const cat = catMap[hintCat?.toLowerCase() || ""] || "Mixed Municipal Solid Waste";
+    setAiAnalysis({
+      category: cat,
+      confidence: 0.92,
+      volumeM3: 2.4,
+      severityScore: hintCat === "hazardous" ? 9.2 : 6.8,
+      tags: ["overflow_bin", "street_spill", "unsegregated"],
+      recommendedAction: "Dispatch 5-Tonne Compactor (Scheduled Route)",
+      isFallback: true,
+    });
+  };
+
+  const analyzePhotoBlob = async (blob: Blob, hintCat?: string) => {
+    setAnalyzingImage(true);
+    setAnalysisStatusText("Uploading image to WasteWise AI...");
+
+    const formData = new FormData();
+    formData.append("file", blob, "citizen_waste_evidence.jpg");
+    if (hintCat) {
+      formData.append("hint_category", hintCat);
+    }
+
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+    try {
+      setAnalysisStatusText("AI Vision Engine: Analyzing waste volume, hazard index, and classification...");
+      const res = await fetch(`${apiUrl}/api/v1/ai/analyze-image-file`, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setAiAnalysis({
+          category: data.category?.toUpperCase() || "MIXED",
+          confidence: Number(data.confidence ?? 0.92),
+          volumeM3: Number(data.estimated_volume_m3 ?? 1.8),
+          severityScore: Number(data.severity_score ?? 6.5),
+          tags: Array.isArray(data.detected_tags) ? data.detected_tags : [],
+          recommendedAction: data.recommended_action || "Deploy municipal collection vehicle",
+          isFallback: Boolean(data.is_fallback),
+        });
+      } else {
+        console.warn("Backend AI returned non-200 status, engaging heuristic fallback", res.status);
+        executeClientFallback(hintCat);
+      }
+    } catch (err) {
+      console.warn("Network error contacting AI endpoint, engaging client heuristic fallback", err);
+      executeClientFallback(hintCat);
+    } finally {
+      setAnalyzingImage(false);
+      setAnalysisStatusText("");
+    }
+  };
+
   const capturePhoto = () => {
     if (videoRef.current && canvasRef.current) {
       const video = videoRef.current;
       const canvas = canvasRef.current;
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
+      canvas.width = video.videoWidth || 640;
+      canvas.height = video.videoHeight || 480;
       const ctx = canvas.getContext('2d');
       if (ctx) {
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
         setImages(prev => [...prev, dataUrl].slice(0, 5));
         
         stopCamera();
         
-        // Trigger instant Computer Vision Analysis Simulation
-        setAnalyzingImage(true);
-        setTimeout(() => {
-          setAiAnalysis({
-            category: category === "plastic" ? "Plastic Packaging" : "Mixed Municipal Solid Waste",
-            confidence: 0.94,
-            volumeM3: 2.8,
-            severityScore: 7.6,
-            tags: ["overflow_bin", "plastic_wrappers", "street_spill"],
-            recommendedAction: "Dispatch 5-Tonne Compactor (High Accumulation Rate)",
-          });
-          setAnalyzingImage(false);
-        }, 600);
+        canvas.toBlob(
+          (blob) => {
+            if (blob) {
+              analyzePhotoBlob(blob, category);
+            }
+          },
+          "image/jpeg",
+          0.85
+        );
       }
     }
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        setImages(prev => [...prev, reader.result as string].slice(0, 5));
+      }
+    };
+    reader.readAsDataURL(file);
+
+    analyzePhotoBlob(file, category);
   };
 
   const handleRemoveImage = (index: number) => {
@@ -252,14 +330,17 @@ export default function CitizenPage() {
     }, 800);
   };
 
-  const [mounted, setMounted] = useState(false);
+  const mounted = React.useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false
+  );
 
   useEffect(() => {
-    setMounted(true);
     return () => {
       // Cleanup camera on unmount
       if (cameraStream) {
-        cameraStream.getTracks().forEach(track => track.stop());
+        cameraStream.getTracks().forEach((track) => track.stop());
       }
     };
   }, [cameraStream]);
@@ -407,36 +488,57 @@ export default function CitizenPage() {
                   {analyzingImage && (
                     <div className="mb-4 p-4 rounded-xl bg-teal-50 border border-teal-200 flex items-center gap-3 text-xs text-teal-800 font-semibold animate-pulse">
                       <Sparkles className="w-4 h-4 text-teal-700 animate-spin" />
-                      <span>WasteWise CV Engine: Analyzing waste volume, hazard index, and classification...</span>
+                      <span>{analysisStatusText || "WasteWise Vision AI: Analyzing waste volume, hazard index, and classification..."}</span>
                     </div>
                   )}
 
                   {aiAnalysis && (
-                    <div className="mb-4 p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-950">
-                      <div className="flex items-center justify-between font-bold mb-2 pb-1.5 border-b border-emerald-200/60">
-                        <span className="flex items-center gap-1.5 text-emerald-800">
-                          <Eye className="w-4 h-4 text-emerald-700" /> AI Computer Vision Breakdown
+                    <div className={`mb-4 p-4 rounded-xl text-xs ${aiAnalysis.isFallback ? "bg-amber-50/70 border border-amber-200 text-amber-950" : "bg-emerald-50 border border-emerald-200 text-emerald-950"}`}>
+                      <div className="flex items-center justify-between font-bold mb-2 pb-1.5 border-b border-slate-200/60">
+                        <span className="flex items-center gap-1.5">
+                          <Eye className={`w-4 h-4 ${aiAnalysis.isFallback ? "text-amber-700" : "text-emerald-700"}`} />
+                          <span className="font-bold">WasteWise AI Vision Analysis</span>
                         </span>
-                        <span className="bg-emerald-200/80 text-emerald-900 px-2 py-0.5 rounded-full text-[10px]">
-                          {(aiAnalysis.confidence * 100).toFixed(0)}% Confidence
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                        <div>
-                          <span className="text-emerald-700 block text-[10px]">Detected Category</span>
-                          <span className="font-bold">{aiAnalysis.category}</span>
-                        </div>
-                        <div>
-                          <span className="text-emerald-700 block text-[10px]">Estimated Volume</span>
-                          <span className="font-bold">{aiAnalysis.volumeM3} m³</span>
-                        </div>
-                        <div>
-                          <span className="text-emerald-700 block text-[10px]">Severity Rating</span>
-                          <span className="font-bold text-amber-800">{aiAnalysis.severityScore} / 10.0</span>
+                        <div className="flex items-center gap-2">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${aiAnalysis.isFallback ? "bg-amber-200/80 text-amber-900 border border-amber-300" : "bg-emerald-200/80 text-emerald-900 border border-emerald-300"}`}>
+                            {aiAnalysis.isFallback ? "Fallback Engine" : "AI Vision Model"}
+                          </span>
+                          <span className="bg-white/80 border border-slate-200 px-2 py-0.5 rounded-full text-[10px] font-medium text-slate-700">
+                            {(aiAnalysis.confidence * 100).toFixed(0)}% Confidence
+                          </span>
                         </div>
                       </div>
-                      <div className="mt-2 text-[11px] text-emerald-800 font-medium">
-                        Action: {aiAnalysis.recommendedAction}
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                        <div className="bg-white/60 p-2 rounded-lg border border-slate-200/50">
+                          <span className="text-slate-500 block text-[10px]">Detected Category</span>
+                          <span className="font-bold text-slate-900">{aiAnalysis.category}</span>
+                        </div>
+                        <div className="bg-white/60 p-2 rounded-lg border border-slate-200/50">
+                          <span className="text-slate-500 block text-[10px]">Estimated Volume</span>
+                          <span className="font-bold text-slate-900">{aiAnalysis.volumeM3} m³</span>
+                        </div>
+                        <div className="bg-white/60 p-2 rounded-lg border border-slate-200/50">
+                          <span className="text-slate-500 block text-[10px]">Severity Rating</span>
+                          <span className={`font-bold ${aiAnalysis.severityScore >= 8.0 ? "text-red-700" : aiAnalysis.severityScore >= 6.0 ? "text-amber-700" : "text-emerald-700"}`}>
+                            {aiAnalysis.severityScore} / 10.0
+                          </span>
+                        </div>
+                      </div>
+
+                      {aiAnalysis.tags && aiAnalysis.tags.length > 0 && (
+                        <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                          <span className="text-[10px] text-slate-500 font-semibold">Identified Tags:</span>
+                          {aiAnalysis.tags.map((tag, idx) => (
+                            <span key={idx} className="px-2 py-0.5 bg-white text-slate-700 rounded-md text-[10px] font-medium border border-slate-200">
+                              #{tag}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="mt-2 text-[11px] font-medium text-slate-800 bg-white/70 p-2 rounded-lg border border-slate-200/60">
+                        <span className="font-semibold text-slate-900">Recommended Action: </span>
+                        {aiAnalysis.recommendedAction}
                       </div>
                     </div>
                   )}
@@ -470,19 +572,39 @@ export default function CitizenPage() {
                       </div>
                     </div>
                   ) : (
-                    <button 
-                      type="button"
-                      onClick={startCamera}
-                      className="w-full border-2 border-dashed border-slate-300 hover:border-[var(--color-primary)] rounded-xl p-6 flex flex-col items-center justify-center cursor-pointer transition-colors bg-[#FAF8F5]"
-                    >
-                      <Camera className="w-8 h-8 text-[var(--color-primary)] mb-2" />
-                      <span className="text-xs font-semibold text-slate-700">
-                        Tap to open camera & capture live photo
-                      </span>
-                      <span className="text-[11px] text-slate-400 mt-1 text-center leading-relaxed">
-                        Live camera capture is required to prevent fraudulent or outdated reports.
-                      </span>
-                    </button>
+                    <div className="space-y-2.5">
+                      <button 
+                        type="button"
+                        onClick={startCamera}
+                        className="w-full border-2 border-dashed border-slate-300 hover:border-[var(--color-primary)] rounded-xl p-6 flex flex-col items-center justify-center cursor-pointer transition-colors bg-[#FAF8F5]"
+                      >
+                        <Camera className="w-8 h-8 text-[var(--color-primary)] mb-2" />
+                        <span className="text-xs font-semibold text-slate-700">
+                          Tap to open camera & capture live photo
+                        </span>
+                        <span className="text-[11px] text-slate-400 mt-1 text-center leading-relaxed">
+                          Live WebRTC camera capture automatically invokes the AI Vision pipeline.
+                        </span>
+                      </button>
+
+                      <div className="flex items-center justify-center">
+                        <input
+                          type="file"
+                          ref={fileInputRef}
+                          onChange={handleFileUpload}
+                          accept="image/jpeg,image/png,image/webp"
+                          className="hidden"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => fileInputRef.current?.click()}
+                          className="text-[11px] text-slate-500 hover:text-[var(--color-primary)] font-medium flex items-center gap-1.5 cursor-pointer py-1"
+                        >
+                          <UploadCloud className="w-3.5 h-3.5" />
+                          <span>Or select image file for AI inspection</span>
+                        </button>
+                      </div>
+                    </div>
                   )}
                 </div>
 

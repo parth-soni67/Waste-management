@@ -5,11 +5,11 @@ Async Redis connection pool for caching, pub/sub (live updates),
 rate limiting, and token revocation tracking.
 """
 
-import redis.asyncio as redis
 from typing import AsyncGenerator
 
-from app.core.config import settings
+import redis.asyncio as redis
 
+from app.core.config import settings
 
 redis_pool: redis.Redis | None = None
 

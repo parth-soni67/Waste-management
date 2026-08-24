@@ -5,7 +5,8 @@ Source of truth: program_spec.md §4.16, §4.17 & §9
 Computes operational KPIs and environmental impact metrics from logged data.
 """
 
-from typing import Dict, Any, List
+from typing import Any, Dict, List
+
 from pydantic import BaseModel
 
 
@@ -28,7 +29,7 @@ class EnvironmentalImpact(BaseModel):
     distance_reduced_km: float
     waste_diverted_from_landfill_kg: float
     route_efficiency_improvement_pct: float
-    trees_equivalent: float              # CO₂ offset expressed as trees
+    trees_equivalent: float  # CO₂ offset expressed as trees
     sdg_alignment: List[str]
 
 
@@ -90,12 +91,48 @@ class AnalyticsService:
         )
 
         zone_breakdown = [
-            {"zone": "Sector 21 APMC Market", "incidents": 4, "waste_kg": 3200, "priority": "P1", "status": "Active"},
-            {"zone": "Sector 11 Residential", "incidents": 3, "waste_kg": 2100, "priority": "P1", "status": "Active"},
-            {"zone": "Sector 12 Hospital", "incidents": 2, "waste_kg": 1800, "priority": "P0", "status": "Critical"},
-            {"zone": "Railway Depot Zone 2", "incidents": 2, "waste_kg": 1400, "priority": "P2", "status": "Active"},
-            {"zone": "Sector 7 School Cluster", "incidents": 1, "waste_kg": 600, "priority": "P3", "status": "Monitored"},
-            {"zone": "Sector 3 Industrial", "incidents": 2, "waste_kg": 3300, "priority": "P2", "status": "Active"},
+            {
+                "zone": "Sector 21 APMC Market",
+                "incidents": 4,
+                "waste_kg": 3200,
+                "priority": "P1",
+                "status": "Active",
+            },
+            {
+                "zone": "Sector 11 Residential",
+                "incidents": 3,
+                "waste_kg": 2100,
+                "priority": "P1",
+                "status": "Active",
+            },
+            {
+                "zone": "Sector 12 Hospital",
+                "incidents": 2,
+                "waste_kg": 1800,
+                "priority": "P0",
+                "status": "Critical",
+            },
+            {
+                "zone": "Railway Depot Zone 2",
+                "incidents": 2,
+                "waste_kg": 1400,
+                "priority": "P2",
+                "status": "Active",
+            },
+            {
+                "zone": "Sector 7 School Cluster",
+                "incidents": 1,
+                "waste_kg": 600,
+                "priority": "P3",
+                "status": "Monitored",
+            },
+            {
+                "zone": "Sector 3 Industrial",
+                "incidents": 2,
+                "waste_kg": 3300,
+                "priority": "P2",
+                "status": "Active",
+            },
         ]
 
         priority_distribution = {"P0": 2, "P1": 3, "P2": 4, "P3": 3, "P4": 2}

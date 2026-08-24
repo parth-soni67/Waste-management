@@ -19,10 +19,11 @@ Security (security_guide.md §8):
   - Query/answer audit logging: every interaction is logged.
 """
 
-import uuid
 import re
-from typing import List, Dict, Any, Optional
+import uuid
 from datetime import datetime, timezone
+from typing import Any, Dict, List
+
 from pydantic import BaseModel
 
 
@@ -39,7 +40,7 @@ class AgentResponse(BaseModel):
     tools_invoked: List[AgentToolCall]
     answer: str
     data_citations: List[str]
-    confidence: str                    # "high" | "medium" | "low"
+    confidence: str  # "high" | "medium" | "low"
     disclaimer: str
     timestamp: str
 
@@ -68,8 +69,16 @@ class MunicipalDecisionAgent:
             "by_priority": {"P0": 2, "P1": 3, "P2": 4, "P3": 3, "P4": 2},
             "top_zones": [
                 {"zone": "Sector 21 APMC Market", "incidents": 4, "avg_priority": "P1"},
-                {"zone": "Sector 11 Residential Corridor", "incidents": 3, "avg_priority": "P1"},
-                {"zone": "Sector 12 Civil Hospital Buffer", "incidents": 2, "avg_priority": "P0"},
+                {
+                    "zone": "Sector 11 Residential Corridor",
+                    "incidents": 3,
+                    "avg_priority": "P1",
+                },
+                {
+                    "zone": "Sector 12 Civil Hospital Buffer",
+                    "incidents": 2,
+                    "avg_priority": "P0",
+                },
                 {"zone": "Railway Depot Zone 2", "incidents": 2, "avg_priority": "P2"},
             ],
             "unresolved_over_4h": 5,
@@ -98,8 +107,16 @@ class MunicipalDecisionAgent:
                 },
             ],
             "predicted_tomorrow": [
-                {"zone": "Sector 21 APMC Market", "expected_volume_m3": 4.2, "recommended_dispatch": "06:00 AM"},
-                {"zone": "Sector 7 School Cluster", "expected_volume_m3": 1.8, "recommended_dispatch": "07:30 AM"},
+                {
+                    "zone": "Sector 21 APMC Market",
+                    "expected_volume_m3": 4.2,
+                    "recommended_dispatch": "06:00 AM",
+                },
+                {
+                    "zone": "Sector 7 School Cluster",
+                    "expected_volume_m3": 1.8,
+                    "recommended_dispatch": "07:30 AM",
+                },
             ],
         }
 
@@ -111,10 +128,34 @@ class MunicipalDecisionAgent:
             "active": 8,
             "utilization_pct": 80.0,
             "vehicles": [
-                {"plate": "GJ-01-WM-4402", "type": "Compactor", "status": "EN_ROUTE", "load_pct": 49.0, "tasks": 3},
-                {"plate": "GJ-01-WM-9120", "type": "Tipper", "status": "COLLECTING", "load_pct": 72.0, "tasks": 2},
-                {"plate": "GJ-01-WM-8820", "type": "Compactor", "status": "AVAILABLE", "load_pct": 0.0, "tasks": 0},
-                {"plate": "GJ-01-WM-5510", "type": "Electric Mini", "status": "AVAILABLE", "load_pct": 0.0, "tasks": 0},
+                {
+                    "plate": "GJ-01-WM-4402",
+                    "type": "Compactor",
+                    "status": "EN_ROUTE",
+                    "load_pct": 49.0,
+                    "tasks": 3,
+                },
+                {
+                    "plate": "GJ-01-WM-9120",
+                    "type": "Tipper",
+                    "status": "COLLECTING",
+                    "load_pct": 72.0,
+                    "tasks": 2,
+                },
+                {
+                    "plate": "GJ-01-WM-8820",
+                    "type": "Compactor",
+                    "status": "AVAILABLE",
+                    "load_pct": 0.0,
+                    "tasks": 0,
+                },
+                {
+                    "plate": "GJ-01-WM-5510",
+                    "type": "Electric Mini",
+                    "status": "AVAILABLE",
+                    "load_pct": 0.0,
+                    "tasks": 0,
+                },
             ],
             "maintenance": 1,
             "offline": 1,
@@ -147,7 +188,10 @@ class MunicipalDecisionAgent:
             "distance_reduced_km": 89.4,
             "route_efficiency_improvement_pct": 23.1,
             "waste_diverted_from_landfill_kg": 4200,
-            "sdg_alignment": ["SDG 11 (Sustainable Cities)", "SDG 12 (Responsible Consumption)"],
+            "sdg_alignment": [
+                "SDG 11 (Sustainable Cities)",
+                "SDG 12 (Responsible Consumption)",
+            ],
         }
 
     # ---------------------------------------------------------------
@@ -155,11 +199,20 @@ class MunicipalDecisionAgent:
     # ---------------------------------------------------------------
 
     INTENT_PATTERNS = [
-        (r"priorit|tomorrow|should we|focus|attention|urgent|critical", "priority_recommendation"),
+        (
+            r"priorit|tomorrow|should we|focus|attention|urgent|critical",
+            "priority_recommendation",
+        ),
         (r"hotspot|predict|forecast|accumul|peak|surge", "hotspot_analysis"),
         (r"vehicle|fleet|truck|driver|capacity|utiliz", "fleet_status"),
-        (r"analytic|kpi|performance|response.?time|sla|compliance|satisfaction", "analytics"),
-        (r"environment|fuel|co2|carbon|emission|sdg|sustain|green", "environmental_impact"),
+        (
+            r"analytic|kpi|performance|response.?time|sla|compliance|satisfaction",
+            "analytics",
+        ),
+        (
+            r"environment|fuel|co2|carbon|emission|sdg|sustain|green",
+            "environmental_impact",
+        ),
         (r"zone|area|sector|why.*(high|critical|priority)", "zone_analysis"),
         (r"route|optim|distance|efficien", "route_analysis"),
     ]
@@ -177,7 +230,9 @@ class MunicipalDecisionAgent:
     # ---------------------------------------------------------------
 
     @classmethod
-    async def process_query(cls, query: str, officer_id: str = "system") -> AgentResponse:
+    async def process_query(
+        cls, query: str, officer_id: str = "system"
+    ) -> AgentResponse:
         query_id = f"AGT-{uuid.uuid4().hex[:8].upper()}"
         intent = cls._classify_intent(query)
         tools_invoked: List[AgentToolCall] = []
@@ -187,8 +242,16 @@ class MunicipalDecisionAgent:
         if intent == "priority_recommendation":
             inc_data = cls._tool_query_incidents()
             hot_data = cls._tool_query_hotspots()
-            tools_invoked.append(AgentToolCall(tool_name="query_incidents", tool_input={}, tool_output=inc_data))
-            tools_invoked.append(AgentToolCall(tool_name="query_hotspots", tool_input={}, tool_output=hot_data))
+            tools_invoked.append(
+                AgentToolCall(
+                    tool_name="query_incidents", tool_input={}, tool_output=inc_data
+                )
+            )
+            tools_invoked.append(
+                AgentToolCall(
+                    tool_name="query_hotspots", tool_input={}, tool_output=hot_data
+                )
+            )
 
             top_zones = inc_data["top_zones"][:3]
             tomorrow = hot_data.get("predicted_tomorrow", [])
@@ -197,24 +260,36 @@ class MunicipalDecisionAgent:
                 f"**Priority Recommendation based on {inc_data['total_active']} active incidents and {hot_data['active_hotspots']} predicted hotspots:**\n",
             ]
             for i, z in enumerate(top_zones, 1):
-                answer_parts.append(f"{i}. **{z['zone']}** — {z['incidents']} active incidents (avg {z['avg_priority']})")
+                answer_parts.append(
+                    f"{i}. **{z['zone']}** — {z['incidents']} active incidents (avg {z['avg_priority']})"
+                )
                 citations.append(f"incidents.top_zones[{i-1}]")
 
             if tomorrow:
                 answer_parts.append("\n**Tomorrow's Predicted Surges:**")
                 for t in tomorrow:
-                    answer_parts.append(f"- {t['zone']}: expected {t['expected_volume_m3']}m³ — recommend dispatch by {t['recommended_dispatch']}")
+                    answer_parts.append(
+                        f"- {t['zone']}: expected {t['expected_volume_m3']}m³ — recommend dispatch by {t['recommended_dispatch']}"
+                    )
                     citations.append(f"hotspots.predicted_tomorrow.{t['zone']}")
 
-            answer_parts.append(f"\n⚠️ {inc_data['sla_violations']} SLA violations currently active. {inc_data['unresolved_over_4h']} incidents unresolved >4 hours.")
+            answer_parts.append(
+                f"\n⚠️ {inc_data['sla_violations']} SLA violations currently active. {inc_data['unresolved_over_4h']} incidents unresolved >4 hours."
+            )
             answer = "\n".join(answer_parts)
             confidence = "high"
 
         elif intent == "hotspot_analysis":
             hot_data = cls._tool_query_hotspots()
-            tools_invoked.append(AgentToolCall(tool_name="query_hotspots", tool_input={}, tool_output=hot_data))
+            tools_invoked.append(
+                AgentToolCall(
+                    tool_name="query_hotspots", tool_input={}, tool_output=hot_data
+                )
+            )
 
-            answer_parts = [f"**Hotspot Analysis — {hot_data['active_hotspots']} Active Predicted Hotspots:**\n"]
+            answer_parts = [
+                f"**Hotspot Analysis — {hot_data['active_hotspots']} Active Predicted Hotspots:**\n"
+            ]
             for h in hot_data["critical_zones"]:
                 answer_parts.append(
                     f"- **{h['zone']}** [{h['risk_level']}] — {int(h['probability']*100)}% probability, "
@@ -226,21 +301,31 @@ class MunicipalDecisionAgent:
 
         elif intent == "fleet_status":
             fleet = cls._tool_query_fleet()
-            tools_invoked.append(AgentToolCall(tool_name="query_fleet", tool_input={}, tool_output=fleet))
+            tools_invoked.append(
+                AgentToolCall(tool_name="query_fleet", tool_input={}, tool_output=fleet)
+            )
 
             answer_parts = [
                 f"**Fleet Status — {fleet['active']}/{fleet['total_vehicles']} vehicles active ({fleet['utilization_pct']}% utilization):**\n",
             ]
             for v in fleet["vehicles"]:
-                answer_parts.append(f"- **{v['plate']}** ({v['type']}) — {v['status']}, {v['load_pct']}% loaded, {v['tasks']} tasks")
+                answer_parts.append(
+                    f"- **{v['plate']}** ({v['type']}) — {v['status']}, {v['load_pct']}% loaded, {v['tasks']} tasks"
+                )
                 citations.append(f"fleet.vehicles.{v['plate']}")
-            answer_parts.append(f"\n{fleet['maintenance']} in maintenance, {fleet['offline']} offline.")
+            answer_parts.append(
+                f"\n{fleet['maintenance']} in maintenance, {fleet['offline']} offline."
+            )
             answer = "\n".join(answer_parts)
             confidence = "high"
 
         elif intent == "analytics":
             analytics = cls._tool_query_analytics()
-            tools_invoked.append(AgentToolCall(tool_name="query_analytics", tool_input={}, tool_output=analytics))
+            tools_invoked.append(
+                AgentToolCall(
+                    tool_name="query_analytics", tool_input={}, tool_output=analytics
+                )
+            )
             today = analytics["today"]
 
             answer = (
@@ -257,7 +342,11 @@ class MunicipalDecisionAgent:
 
         elif intent == "environmental_impact":
             env = cls._tool_query_environmental()
-            tools_invoked.append(AgentToolCall(tool_name="query_environmental", tool_input={}, tool_output=env))
+            tools_invoked.append(
+                AgentToolCall(
+                    tool_name="query_environmental", tool_input={}, tool_output=env
+                )
+            )
 
             answer = (
                 f"**Environmental Impact Dashboard (SDG 11 & 12):**\n\n"
@@ -274,17 +363,33 @@ class MunicipalDecisionAgent:
         elif intent == "zone_analysis":
             inc_data = cls._tool_query_incidents()
             hot_data = cls._tool_query_hotspots()
-            tools_invoked.append(AgentToolCall(tool_name="query_incidents", tool_input={}, tool_output=inc_data))
-            tools_invoked.append(AgentToolCall(tool_name="query_hotspots", tool_input={}, tool_output=hot_data))
+            tools_invoked.append(
+                AgentToolCall(
+                    tool_name="query_incidents", tool_input={}, tool_output=inc_data
+                )
+            )
+            tools_invoked.append(
+                AgentToolCall(
+                    tool_name="query_hotspots", tool_input={}, tool_output=hot_data
+                )
+            )
 
             answer_parts = ["**Zone Priority Analysis:**\n"]
             for z in inc_data["top_zones"]:
                 # Find matching hotspot data
                 matching_hot = next(
-                    (h for h in hot_data.get("critical_zones", []) if z["zone"] in h["zone"]),
+                    (
+                        h
+                        for h in hot_data.get("critical_zones", [])
+                        if z["zone"] in h["zone"]
+                    ),
                     None,
                 )
-                reason = f" — Hotspot reason: {matching_hot['reason']}" if matching_hot else ""
+                reason = (
+                    f" — Hotspot reason: {matching_hot['reason']}"
+                    if matching_hot
+                    else ""
+                )
                 answer_parts.append(
                     f"- **{z['zone']}**: {z['incidents']} incidents, avg priority {z['avg_priority']}{reason}"
                 )
@@ -298,11 +403,21 @@ class MunicipalDecisionAgent:
             inc_data = cls._tool_query_incidents()
             fleet = cls._tool_query_fleet()
             analytics = cls._tool_query_analytics()
-            tools_invoked.extend([
-                AgentToolCall(tool_name="query_incidents", tool_input={}, tool_output=inc_data),
-                AgentToolCall(tool_name="query_fleet", tool_input={}, tool_output=fleet),
-                AgentToolCall(tool_name="query_analytics", tool_input={}, tool_output=analytics),
-            ])
+            tools_invoked.extend(
+                [
+                    AgentToolCall(
+                        tool_name="query_incidents", tool_input={}, tool_output=inc_data
+                    ),
+                    AgentToolCall(
+                        tool_name="query_fleet", tool_input={}, tool_output=fleet
+                    ),
+                    AgentToolCall(
+                        tool_name="query_analytics",
+                        tool_input={},
+                        tool_output=analytics,
+                    ),
+                ]
+            )
             today = analytics["today"]
 
             answer = (

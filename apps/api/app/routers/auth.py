@@ -3,16 +3,16 @@ WasteWise AI — Authentication Router
 Endpoints for user registration, Argon2id authentication, token refresh, and profile inspection.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, Response, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
-from app.core.security import get_current_user, TokenPayload
+from app.core.security import TokenPayload, get_current_user
 from app.schemas.all_schemas import (
-    UserRegisterRequest,
-    UserLoginRequest,
     TokenResponse,
+    UserLoginRequest,
     UserRead,
+    UserRegisterRequest,
 )
 from app.services.auth_service import AuthService
 

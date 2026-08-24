@@ -7,19 +7,18 @@ FastAPI dependencies for auth + RBAC enforcement.
 Implements security_guide.md §1 (auth) and §2 (authorization).
 """
 
-from datetime import datetime, timedelta, timezone
-from typing import Optional, List
 import uuid
+from datetime import datetime, timedelta, timezone
+from typing import Optional
 
+from argon2 import PasswordHasher
+from argon2.exceptions import InvalidHashError, VerifyMismatchError
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
-from argon2 import PasswordHasher
-from argon2.exceptions import VerifyMismatchError, InvalidHashError
 from pydantic import BaseModel
 
 from app.core.config import settings
-
 
 # ---------------------------------------------------------------------------
 # Password hashing — Argon2id per security_guide.md §1
@@ -39,6 +38,9 @@ def hash_password(password: str) -> str:
     return ph.hash(password)
 
 
+get_password_hash = hash_password
+
+
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """
     Constant-time password verification per security_guide.md §1.
@@ -55,6 +57,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 # Access: short-lived (15 min). Refresh: longer (7 days), rotated.
 # ---------------------------------------------------------------------------
 
+
 class TokenPayload(BaseModel):
     sub: str  # user id
     role: str
@@ -70,7 +73,9 @@ def create_access_token(
 ) -> str:
     """Create a short-lived JWT access token."""
     now = datetime.now(timezone.utc)
-    expire = now + (expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
+    expire = now + (
+        expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    )
     payload = {
         "sub": str(user_id),
         "role": role,
@@ -126,6 +131,9 @@ def decode_token(token: str) -> TokenPayload:
 # ---------------------------------------------------------------------------
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+oauth2_scheme_optional = OAuth2PasswordBearer(
+    tokenUrl="/api/v1/auth/login", auto_error=False
+)
 
 
 async def get_current_user(token: str = Depends(oauth2_scheme)) -> TokenPayload:
@@ -142,6 +150,24 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> TokenPayload:
     return token_data
 
 
+async def get_optional_user(
+    token: Optional[str] = Depends(oauth2_scheme_optional),
+) -> Optional[TokenPayload]:
+    """
+    Optional user dependency. Returns TokenPayload if a valid Bearer token is provided,
+    otherwise returns None without raising 401. Useful for public/citizen endpoints.
+    """
+    if not token:
+        return None
+    try:
+        token_data = decode_token(token)
+        if token_data.type != "access":
+            return None
+        return token_data
+    except Exception:
+        return None
+
+
 def require_role(*allowed_roles: str):
     """
     RBAC dependency factory per security_guide.md §2.
@@ -149,6 +175,7 @@ def require_role(*allowed_roles: str):
 
     Server-side enforcement — never trust frontend role claims alone.
     """
+
     async def role_checker(
         current_user: TokenPayload = Depends(get_current_user),
     ) -> TokenPayload:

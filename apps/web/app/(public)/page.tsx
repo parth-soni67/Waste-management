@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, Suspense } from "react";
+import React, { Suspense } from "react";
 import dynamic from "next/dynamic";
 import AuthCard from "@/components/landing/AuthCard";
 import LandingHero from "@/components/landing/LandingHero";
@@ -15,33 +15,37 @@ const CityScene3D = dynamic(
   }
 );
 
+function checkNeedsFallback(): boolean {
+  if (typeof window === "undefined") return true;
+  const prefersReducedMotion = window.matchMedia(
+    "(prefers-reduced-motion: reduce)"
+  ).matches;
+
+  let hasWebGL = false;
+  try {
+    const canvas = document.createElement("canvas");
+    hasWebGL = Boolean(
+      window.WebGLRenderingContext &&
+        (canvas.getContext("webgl") || canvas.getContext("experimental-webgl"))
+    );
+  } catch {
+    hasWebGL = false;
+  }
+
+  return prefersReducedMotion || !hasWebGL;
+}
+
 export default function MergedLandingAuthPage() {
-  const [useFallback, setUseFallback] = useState(false);
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-    // Check reduced motion preference or WebGL availability
-    const prefersReducedMotion = window.matchMedia(
-      "(prefers-reduced-motion: reduce)"
-    ).matches;
-
-    // Check basic WebGL support
-    let hasWebGL = false;
-    try {
-      const canvas = document.createElement("canvas");
-      hasWebGL = Boolean(
-        window.WebGLRenderingContext &&
-          (canvas.getContext("webgl") || canvas.getContext("experimental-webgl"))
-      );
-    } catch {
-      hasWebGL = false;
-    }
-
-    if (prefersReducedMotion || !hasWebGL) {
-      setUseFallback(true);
-    }
-  }, []);
+  const useFallback = React.useSyncExternalStore(
+    () => () => {},
+    () => checkNeedsFallback(),
+    () => true
+  );
+  const mounted = React.useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false
+  );
 
   return (
     <div className="relative w-full min-h-screen flex items-center justify-center p-4 sm:p-6 md:p-12 overflow-x-hidden bg-[var(--color-canvas)]">

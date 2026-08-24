@@ -5,16 +5,16 @@ Async SQLAlchemy engine, session factory, and declarative base.
 All models inherit from Base. Sessions are injected via get_db() dependency.
 """
 
+from typing import AsyncGenerator
+
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
 from sqlalchemy.orm import DeclarativeBase
-from typing import AsyncGenerator
 
 from app.core.config import settings
-
 
 # Format URL for asyncpg
 db_url = settings.DATABASE_URL
@@ -46,6 +46,7 @@ async_session_factory = async_sessionmaker(
 
 class Base(DeclarativeBase):
     """Declarative base for all SQLAlchemy models."""
+
     pass
 
 

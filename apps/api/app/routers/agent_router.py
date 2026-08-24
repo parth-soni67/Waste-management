@@ -6,8 +6,8 @@ POST /api/v1/agent/query — Officer submits a natural language question.
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from app.core.security import require_role, TokenPayload
-from app.ai.municipal_agent import MunicipalDecisionAgent, AgentResponse
+from app.ai.municipal_agent import AgentResponse, MunicipalDecisionAgent
+from app.core.security import TokenPayload, require_role
 
 router = APIRouter()
 

@@ -12,21 +12,22 @@ no external API or GPU dependency.
 
 import hashlib
 import random
-from typing import List, Optional
-from pydantic import BaseModel
 from datetime import datetime, timezone
+from typing import List
+
+from pydantic import BaseModel
 
 
 class VerificationResult(BaseModel):
     incident_id: str
-    clearance_confidence: float        # 0.0 – 100.0
+    clearance_confidence: float  # 0.0 – 100.0
     is_cleared: bool
-    status: str                        # VERIFIED | NEEDS_REVIEW | REJECTED
+    status: str  # VERIFIED | NEEDS_REVIEW | REJECTED
     comparison_notes: List[str]
     before_image_count: int
     after_image_count: int
     verified_at: str
-    verification_method: str           # "ai_structural_similarity" | "heuristic_fallback"
+    verification_method: str  # "ai_structural_similarity" | "heuristic_fallback"
 
 
 class CollectionVerificationService:
@@ -45,7 +46,7 @@ class CollectionVerificationService:
     """
 
     # Thresholds
-    VERIFIED_THRESHOLD = 75.0      # ≥ 75% clearance → VERIFIED
+    VERIFIED_THRESHOLD = 75.0  # ≥ 75% clearance → VERIFIED
     NEEDS_REVIEW_THRESHOLD = 40.0  # 40-74% → officer must review
     # < 40% → REJECTED (driver must re-collect)
 
@@ -76,10 +77,10 @@ class CollectionVerificationService:
         category_adjustments = {
             "mixed": 0.0,
             "plastic": 2.0,
-            "organic": -3.0,      # Organic residue harder to fully clear
+            "organic": -3.0,  # Organic residue harder to fully clear
             "construction": -8.0,  # Heavy debris often leaves traces
             "e_waste": 1.0,
-            "hazardous": -12.0,    # Hazardous requires specialized cleanup
+            "hazardous": -12.0,  # Hazardous requires specialized cleanup
         }
         cat_adj = category_adjustments.get(incident_category, 0.0)
 
@@ -90,27 +91,38 @@ class CollectionVerificationService:
         evidence_bonus = min(5.0, len(after_image_urls) * 2.0)
 
         confidence = round(
-            min(99.5, max(5.0, base_clearance + cat_adj - volume_penalty + evidence_bonus)),
+            min(
+                99.5,
+                max(5.0, base_clearance + cat_adj - volume_penalty + evidence_bonus),
+            ),
             1,
         )
 
         # Build human-readable comparison notes
-        notes.append(f"Analyzed {len(before_image_urls)} before image(s) and {len(after_image_urls)} after image(s)")
+        notes.append(
+            f"Analyzed {len(before_image_urls)} before image(s) and {len(after_image_urls)} after image(s)"
+        )
 
         if confidence >= cls.VERIFIED_THRESHOLD:
-            notes.append(f"Structural comparison: {confidence}% area clearance detected")
+            notes.append(
+                f"Structural comparison: {confidence}% area clearance detected"
+            )
             notes.append("Waste accumulation no longer visible at reported coordinates")
             if confidence >= 90.0:
                 notes.append("High-confidence clearance — minimal residual detected")
             status = "VERIFIED"
             is_cleared = True
         elif confidence >= cls.NEEDS_REVIEW_THRESHOLD:
-            notes.append(f"Partial clearance detected ({confidence}%) — officer review recommended")
+            notes.append(
+                f"Partial clearance detected ({confidence}%) — officer review recommended"
+            )
             notes.append("Some residual waste or debris may remain at location")
             status = "NEEDS_REVIEW"
             is_cleared = False
         else:
-            notes.append(f"Insufficient clearance ({confidence}%) — waste still substantially present")
+            notes.append(
+                f"Insufficient clearance ({confidence}%) — waste still substantially present"
+            )
             notes.append("Driver should re-attempt collection or report obstruction")
             status = "REJECTED"
             is_cleared = False

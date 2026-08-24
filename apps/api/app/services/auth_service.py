@@ -5,31 +5,27 @@ Handles user registration, Argon2id password verification, JWT access & refresh 
 and session revocation tracking via RefreshToken database records and Redis.
 """
 
-import uuid
-from datetime import datetime, timedelta, timezone
-from typing import Optional, Tuple
+from datetime import datetime, timezone
+from typing import Tuple
 
 from fastapi import HTTPException, status
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
 from app.core.security import (
-    hash_password,
-    verify_password,
     create_access_token,
     create_refresh_token,
     decode_token,
+    hash_password,
+    verify_password,
 )
-from app.models.entities import User, UserRole, RefreshToken
-from app.schemas.all_schemas import UserRegisterRequest, UserLoginRequest
+from app.models.entities import RefreshToken, User, UserRole
+from app.schemas.all_schemas import UserLoginRequest, UserRegisterRequest
 
 
 class AuthService:
     @staticmethod
-    async def register_citizen(
-        db: AsyncSession, payload: UserRegisterRequest
-    ) -> User:
+    async def register_citizen(db: AsyncSession, payload: UserRegisterRequest) -> User:
         """Register a new citizen user."""
         # Check if email already exists
         stmt = select(User).where(User.email == payload.email)

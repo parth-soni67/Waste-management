@@ -22,23 +22,23 @@ from sqlalchemy import text
 
 from app.core.config import settings
 from app.core.db import engine
-from app.core.redis import init_redis, close_redis, redis_pool
+from app.core.redis import close_redis, init_redis, redis_pool
+from app.routers.agent_router import router as agent_router
+from app.routers.ai_router import router as ai_router
+from app.routers.analytics_router import router as analytics_router
 from app.routers.auth import router as auth_router
-from app.routers.vehicles import router as vehicles_router
 from app.routers.incidents import (
     incidents_router,
     reports_router,
 )
-from app.routers.ai_router import router as ai_router
 from app.routers.optimization_router import router as optimization_router
+from app.routers.vehicles import router as vehicles_router
 from app.routers.verification_router import router as verification_router
-from app.routers.agent_router import router as agent_router
-from app.routers.analytics_router import router as analytics_router
-
 
 # ---------------------------------------------------------------------------
 # Lifespan — startup / shutdown
 # ---------------------------------------------------------------------------
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
@@ -83,6 +83,7 @@ app.add_middleware(
 # Health endpoint — system_guide.md §6
 # ---------------------------------------------------------------------------
 
+
 @app.get("/health", tags=["system"])
 async def health_check():
     """
@@ -116,6 +117,7 @@ async def health_check():
         health["status"] = "degraded"
 
     from fastapi.responses import JSONResponse
+
     status_code = 200 if overall_ok else 503
     return JSONResponse(content=health, status_code=status_code)
 
@@ -129,7 +131,11 @@ app.include_router(vehicles_router, prefix="/api/v1/vehicles", tags=["vehicles"]
 app.include_router(incidents_router, prefix="/api/v1/incidents", tags=["incidents"])
 app.include_router(reports_router, prefix="/api/v1/reports", tags=["reports"])
 app.include_router(ai_router, prefix="/api/v1/ai", tags=["ai"])
-app.include_router(optimization_router, prefix="/api/v1/optimization", tags=["optimization"])
-app.include_router(verification_router, prefix="/api/v1/verification", tags=["verification"])
+app.include_router(
+    optimization_router, prefix="/api/v1/optimization", tags=["optimization"]
+)
+app.include_router(
+    verification_router, prefix="/api/v1/verification", tags=["verification"]
+)
 app.include_router(agent_router, prefix="/api/v1/agent", tags=["agent"])
 app.include_router(analytics_router, prefix="/api/v1/analytics", tags=["analytics"])

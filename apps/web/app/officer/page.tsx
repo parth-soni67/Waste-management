@@ -79,8 +79,8 @@ interface FleetVehicle {
   type: string;
   capacityKg: number;
   currentLoadKg: number;
-  status: "AVAILABLE" | "ASSIGNED" | "EN_ROUTE" | "COLLECTING";
-  driver: string;
+  status: "AVAILABLE" | "ASSIGNED" | "EN_ROUTE" | "COLLECTING" | "MAINTENANCE";
+  driver?: string;
   lat: number;
   lng: number;
   zone: string;
@@ -92,8 +92,8 @@ interface FleetDriver {
   phone: string;
   license: string;
   zone: string;
-  assignedTruck: string;
-  status: "ACTIVE" | "ON_BREAK" | "OFF_DUTY";
+  assignedTruck?: string;
+  status: "ACTIVE" | "ON_BREAK" | "OFF_DUTY" | "ON LEAVE";
 }
 
 interface CitizenReportDetail {
@@ -444,7 +444,7 @@ export default function OfficerPage() {
         if (syncedIncidents.length > 0) {
           setIncidents(prev => {
             const existingIds = new Set(prev.map(p => p.id));
-            const newIncidents = syncedIncidents.filter((i: any) => !existingIds.has(i.id));
+            const newIncidents = (syncedIncidents as IncidentItem[]).filter((i) => !existingIds.has(i.id));
             if (newIncidents.length === 0) return prev;
             return [...newIncidents, ...prev];
           });
@@ -453,7 +453,7 @@ export default function OfficerPage() {
         if (syncedDetails.length > 0) {
           setCitizenReports(prev => {
             const existingIds = new Set(prev.map(p => p.reportId));
-            const newDetails = syncedDetails.filter((r: any) => !existingIds.has(r.reportId));
+            const newDetails = (syncedDetails as CitizenReportDetail[]).filter((r) => !existingIds.has(r.reportId));
             if (newDetails.length === 0) return prev;
             return [...newDetails, ...prev];
           });
@@ -553,7 +553,7 @@ export default function OfficerPage() {
           if (inc.id === report.incidentId) {
             return {
               ...inc,
-              ...(priorityToSet ? { priority: priorityToSet as any } : {}),
+              ...(priorityToSet ? { priority: priorityToSet as IncidentItem["priority"] } : {}),
               ...(action === "APPROVED" ? { status: "ASSIGNED", assignedTruck: truckToSet } : {})
             };
           }
@@ -863,11 +863,11 @@ export default function OfficerPage() {
     }, 600);
   };
 
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  const mounted = React.useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false
+  );
 
   if (!mounted) {
     return (

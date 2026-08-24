@@ -2,7 +2,7 @@
 
 import React from "react";
 import { motion } from "framer-motion";
-import { Sparkles, ArrowDownRight } from "lucide-react";
+import { Sparkles } from "lucide-react";
 
 /**
  * WasteWise AI — Kinetic Landing Headline

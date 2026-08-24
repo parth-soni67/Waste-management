@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import {
   Truck,
   Navigation,
@@ -32,7 +32,6 @@ interface DriverTask {
 }
 
 export default function DriverPage() {
-  const [vehicleStatus, setVehicleStatus] = useState("EN_ROUTE");
   const [currentLoad, setCurrentLoad] = useState(2450);
   const maxCapacity = 5000;
   const [hasRerouteAlert, setHasRerouteAlert] = useState(true);
@@ -104,11 +103,11 @@ export default function DriverPage() {
     }
   };
 
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  const mounted = React.useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false
+  );
 
   const loadPercentage = Math.round((currentLoad / maxCapacity) * 100);
 

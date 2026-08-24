@@ -10,23 +10,20 @@ Usage:
 """
 
 import asyncio
-import sys
 import os
+import sys
 
 # Add the apps/api directory to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from app.core.db import engine, Base, async_session_factory
+from app.core.db import Base, async_session_factory, engine
+from app.core.security import get_password_hash
 from app.models.entities import (
     User,
     UserRole,
     Vehicle,
     VehicleStatus,
-    Incident,
-    PriorityLevel,
-    IncidentStatus,
 )
-from app.core.security import get_password_hash
 
 
 async def init_and_seed_database():
@@ -42,6 +39,7 @@ async def init_and_seed_database():
     # 2. Seed Initial Admin, Officer, Driver & Citizen Users
     async with async_session_factory() as session:
         from sqlalchemy import select
+
         result = await session.execute(select(User).limit(1))
         existing_user = result.scalars().first()
 
@@ -52,7 +50,7 @@ async def init_and_seed_database():
             users = [
                 User(
                     email="officer@wastewise.gov",
-                    password_hash=demo_password_hash,
+                    hashed_password=demo_password_hash,
                     full_name="Officer Rajesh Sharma",
                     role=UserRole.OFFICER,
                     is_active=True,
@@ -60,7 +58,7 @@ async def init_and_seed_database():
                 ),
                 User(
                     email="driver@wastewise.gov",
-                    password_hash=demo_password_hash,
+                    hashed_password=demo_password_hash,
                     full_name="Driver Vikram Patel",
                     role=UserRole.DRIVER,
                     is_active=True,
@@ -68,7 +66,7 @@ async def init_and_seed_database():
                 ),
                 User(
                     email="citizen@wastewise.gov",
-                    password_hash=demo_password_hash,
+                    hashed_password=demo_password_hash,
                     full_name="Citizen Priya Mehta",
                     role=UserRole.CITIZEN,
                     is_active=True,
@@ -76,7 +74,7 @@ async def init_and_seed_database():
                 ),
                 User(
                     email="admin@wastewise.gov",
-                    password_hash=demo_password_hash,
+                    hashed_password=demo_password_hash,
                     full_name="Chief Admin",
                     role=UserRole.ADMIN,
                     is_active=True,

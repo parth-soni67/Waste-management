@@ -4,18 +4,32 @@ Endpoints for Vehicle Assignment Engine, Dynamic Route Optimization, Loop C trig
 """
 
 import uuid
-from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, WebSocket, WebSocketDisconnect
+from typing import Any, Dict, List
+
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
-from app.core.security import get_current_user, require_role, TokenPayload
-from app.models.entities import Incident, Vehicle, PriorityLevel
-from app.services.vehicle_assignment_service import VehicleAssignmentService, AssignmentCandidate
+from app.core.security import TokenPayload, require_role
+from app.models.entities import Incident
+from app.services.predictive_planning_service import (
+    PredictivePlanningService,
+    ProactiveDispatchPlan,
+)
 from app.services.routing_service import DynamicRouteOptimizer, OptimizedRoute
-from app.services.predictive_planning_service import PredictivePlanningService, ProactiveDispatchPlan
+from app.services.vehicle_assignment_service import (
+    AssignmentCandidate,
+    VehicleAssignmentService,
+)
 from app.ws.live_ws import ws_manager
 
 router = APIRouter()
@@ -47,7 +61,9 @@ async def recommend_vehicle_assignment(
     incident = res.scalar_one_or_none()
 
     if not incident:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found"
+        )
 
     candidates = await VehicleAssignmentService.rank_candidate_vehicles(db, incident)
     return candidates
@@ -93,8 +109,22 @@ async def simulate_p0_emergency(
 
     # Base active stops
     existing_stops = [
-        {"id": "INC-8042", "title": "Plastic pile by Railway Depot", "priority": "P1", "lat": 23.018, "lng": 72.562, "estimated_load_kg": 420.0},
-        {"id": "INC-7994", "title": "Organic market waste spill", "priority": "P2", "lat": 23.045, "lng": 72.548, "estimated_load_kg": 600.0},
+        {
+            "id": "INC-8042",
+            "title": "Plastic pile by Railway Depot",
+            "priority": "P1",
+            "lat": 23.018,
+            "lng": 72.562,
+            "estimated_load_kg": 420.0,
+        },
+        {
+            "id": "INC-7994",
+            "title": "Organic market waste spill",
+            "priority": "P2",
+            "lat": 23.045,
+            "lng": 72.548,
+            "estimated_load_kg": 600.0,
+        },
     ]
 
     # Recompute route via dynamic optimizer

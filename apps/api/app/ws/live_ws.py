@@ -6,9 +6,10 @@ Manages full-duplex WebSocket connections and broadcasts real-time route changes
 P0 emergency insertions, and vehicle position telemetry.
 """
 
-from typing import List, Dict, Any
-from fastapi import WebSocket, WebSocketDisconnect
 import json
+from typing import Any, Dict, List
+
+from fastapi import WebSocket
 
 
 class WebSocketManager:

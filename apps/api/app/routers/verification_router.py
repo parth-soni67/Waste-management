@@ -4,11 +4,15 @@ Endpoints for before/after evidence, AI visual clearance, and citizen resolution
 """
 
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from app.core.security import get_current_user, require_role, TokenPayload
-from app.ai.verification_service import CollectionVerificationService, VerificationResult
+from app.ai.verification_service import (
+    CollectionVerificationService,
+    VerificationResult,
+)
+from app.core.security import TokenPayload, get_current_user, require_role
 
 router = APIRouter()
 
@@ -23,7 +27,7 @@ class SubmitEvidenceRequest(BaseModel):
 
 class CitizenConfirmRequest(BaseModel):
     incident_id: str
-    confirmation: str   # "yes" | "no" | "partial"
+    confirmation: str  # "yes" | "no" | "partial"
     comment: Optional[str] = None
 
 
@@ -97,7 +101,7 @@ async def citizen_resolution_confirmation(
         return {
             "status": "noted",
             "incident_id": inc_id,
-            "message": f"Your feedback has been recorded. If the issue persists, submit another rejection to escalate.",
+            "message": "Your feedback has been recorded. If the issue persists, submit another rejection to escalate.",
             "no_count": no_count,
             "action": "FEEDBACK_RECORDED",
         }

@@ -6,9 +6,9 @@ Predicts geographic zones where waste accumulation will surge before citizen sev
 Outputs spatial risk ratings (LOW, MEDIUM, HIGH, CRITICAL), accumulation probabilities, and peak windows.
 """
 
-from typing import List, Dict, Any
+from typing import List
+
 from pydantic import BaseModel, Field
-from datetime import datetime
 
 
 class HotspotPrediction(BaseModel):

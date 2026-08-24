@@ -7,18 +7,21 @@ Generates structured alerts for citizens (status changes), officers
 proactive recommendations.
 """
 
-from typing import List, Optional
-from pydantic import BaseModel
 from datetime import datetime, timezone
+from typing import List, Optional
+
+from pydantic import BaseModel
 
 
 class SmartAlert(BaseModel):
     alert_id: str
-    alert_type: str                  # "citizen_status" | "officer_critical" | "ai_proactive" | "sla_violation"
-    severity: str                    # "info" | "warning" | "critical"
+    alert_type: (
+        str  # "citizen_status" | "officer_critical" | "ai_proactive" | "sla_violation"
+    )
+    severity: str  # "info" | "warning" | "critical"
     title: str
     message: str
-    target_role: str                 # "citizen" | "officer" | "driver" | "all"
+    target_role: str  # "citizen" | "officer" | "driver" | "all"
     target_user_id: Optional[str] = None
     related_incident_id: Optional[str] = None
     action_required: bool = False

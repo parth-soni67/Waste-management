@@ -5,14 +5,15 @@ Endpoints for vehicle fleet management, status updates, and live GPS telemetry.
 
 import uuid
 from typing import List, Optional
+
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
-from app.core.security import require_role, TokenPayload
-from app.models.entities import Vehicle, VehicleStatus, UserRole
-from app.schemas.all_schemas import VehicleCreate, VehicleUpdate, VehicleRead
+from app.core.security import TokenPayload, require_role
+from app.models.entities import Vehicle, VehicleStatus
+from app.schemas.all_schemas import VehicleCreate, VehicleRead, VehicleUpdate
 
 router = APIRouter()
 
@@ -65,7 +66,9 @@ async def update_vehicle_status(
     vehicle = res.scalar_one_or_none()
 
     if not vehicle:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vehicle not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Vehicle not found"
+        )
 
     if payload.status is not None:
         vehicle.status = payload.status

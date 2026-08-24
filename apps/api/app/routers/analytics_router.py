@@ -2,12 +2,17 @@
 WasteWise AI — Analytics & Environmental Impact Router
 """
 
+from typing import List
+
 from fastapi import APIRouter, Depends
 
-from app.core.security import require_role, TokenPayload
-from app.services.analytics_service import AnalyticsService, DashboardPayload, EnvironmentalImpact
+from app.core.security import TokenPayload, require_role
 from app.services.alerts_service import AlertsService, SmartAlert
-from typing import List
+from app.services.analytics_service import (
+    AnalyticsService,
+    DashboardPayload,
+    EnvironmentalImpact,
+)
 
 router = APIRouter()
 

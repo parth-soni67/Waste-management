@@ -6,8 +6,10 @@ Proactively recommends vehicle dispatch routes and departure times derived from
 hotspot output BEFORE citizen complaints accumulate.
 """
 
-from typing import List, Dict, Any
+from typing import List
+
 from pydantic import BaseModel
+
 from app.ai.hotspot_service import HotspotPredictionService
 
 
@@ -37,7 +39,11 @@ class PredictivePlanningService:
                         plan_id=f"PLAN-PRO-{idx:02d}",
                         target_zone=h.zone_name,
                         recommended_time=h.peak_window,
-                        assigned_vehicle_type="5T Compactor" if "Mixed" in h.primary_waste_type else "Tipper",
+                        assigned_vehicle_type=(
+                            "5T Compactor"
+                            if "Mixed" in h.primary_waste_type
+                            else "Tipper"
+                        ),
                         predicted_volume_m3=3.5 if h.risk_level == "CRITICAL" else 2.2,
                         expected_co2_reduction_kg=8.4,
                         urgency_reason=f"Prevent peak surge: {h.contributing_factors[0]}",

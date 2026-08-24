@@ -5,10 +5,11 @@ Single source of truth for all backend settings.
 Loaded from environment variables via Pydantic BaseSettings.
 """
 
-from pydantic_settings import BaseSettings
-from pydantic import field_validator
-from typing import List
 import json
+from typing import List
+
+from pydantic import field_validator
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
@@ -21,7 +22,9 @@ class Settings(BaseSettings):
     POSTGRES_USER: str = "wastewise"
     POSTGRES_PASSWORD: str = "changeme_dev"
     POSTGRES_DB: str = "wastewise"
-    DATABASE_URL: str = "postgresql+asyncpg://wastewise:changeme_dev@postgres:5432/wastewise"
+    DATABASE_URL: str = (
+        "postgresql+asyncpg://wastewise:changeme_dev@postgres:5432/wastewise"
+    )
 
     # --- Redis ---
     REDIS_URL: str = "redis://redis:6379/0"
@@ -46,15 +49,22 @@ class Settings(BaseSettings):
             except json.JSONDecodeError:
                 pass
             return [origin.strip() for origin in v.split(",") if origin.strip()]
-        return v   
+        return v
 
     # --- Routing Engine ---
     ROUTING_ENGINE_URL: str = "https://router.project-osrm.org"
 
-    # --- AI/ML (populated in later phases) ---
-    LLM_PROVIDER: str = ""
+    # --- AI/ML (Vision / LLM) ---
+    LLM_PROVIDER: str = "gemini"
     LLM_API_KEY: str = ""
-    LLM_MODEL: str = ""
+    LLM_MODEL: str = "gemini-3.6-flash"
+    AI_TIMEOUT_SECONDS: float = 25.0
+
+    # --- Supabase (Auth, Storage & Database) ---
+    SUPABASE_URL: str = "https://qjqfziwzaobizdqcmnxq.supabase.co"
+    SUPABASE_ANON_KEY: str = ""
+    SUPABASE_PUBLISHABLE_KEY: str = ""
+    SUPABASE_SECRET_KEY: str = ""
 
     # --- File Upload ---
     MAX_UPLOAD_SIZE_MB: int = 10
@@ -71,9 +81,12 @@ class Settings(BaseSettings):
     @property
     def database_url_sync(self) -> str:
         """Sync database URL for Alembic migrations."""
-        return self.DATABASE_URL.replace(
-            "postgresql+asyncpg://", "postgresql+psycopg2://"
-        )
+        url = self.DATABASE_URL
+        if url.startswith("postgresql+asyncpg://"):
+            return url.replace("postgresql+asyncpg://", "postgresql://", 1)
+        elif url.startswith("postgres://"):
+            return url.replace("postgres://", "postgresql://", 1)
+        return url
 
 
 settings = Settings()

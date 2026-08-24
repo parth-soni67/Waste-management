@@ -1,0 +1,36 @@
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+exclude = [
+    ".git",
+    "apps/api/venv",
+    "apps/api/.venv",
+    "**/venv/**",
+    "**/.venv/**",
+    "**/__pycache__/**",
+    "apps/api/alembic/**",
+    "node_modules",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = [
+    "E501",
+    "B008",
+]
+
+[tool.black]
+line-length = 88
+target-version = ["py312"]
+exclude = '''
+/(
+    \.git
+  | apps/api/venv
+  | apps/api/\.venv
+  | venv
+  | \.venv
+  | __pycache__
+  | apps/api/alembic
+  | node_modules
+)/
+'''

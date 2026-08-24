@@ -3,40 +3,61 @@ WasteWise AI — Computer Vision & Waste Classification Service
 Source of truth: program_spec.md §4.2 & ai_rules.md #7
 
 Analyzes waste imagery to:
-1. Detect and classify primary waste category (Mixed, Plastic, Organic, Construction, E-Waste, Hazardous).
+1. Detect and classify primary waste category (Mixed, Plastic, Organic, Construction, E-Waste, Hazardous, Paper, Metal, Glass, Other).
 2. Estimate accumulation volume (m³) and severity score (0.0 to 10.0).
 3. Generate contextual tags and recommended municipal dispatch action.
-4. Non-AI Heuristic Fallback Path ensures the demo never breaks if an external model is unavailable.
+4. Multimodal Vision Provider integration (e.g. Gemini Vision model) with safe heuristic fallback.
+5. Non-AI Heuristic Fallback Path ensures the demo never breaks if an external model is unavailable.
 """
 
 import hashlib
+import logging
 import random
-from typing import List, Dict, Any, Optional
-from pydantic import BaseModel, Field
+from typing import Optional
 
+from app.ai.providers.factory import get_vision_provider
+from app.schemas.all_schemas import WasteAnalysisResult
 
-class WasteAnalysisResult(BaseModel):
-    category: str = Field(description="Primary detected waste type")
-    confidence: float = Field(ge=0.0, le=1.0, description="Detection confidence score")
-    estimated_volume_m3: float = Field(ge=0.1, description="Estimated waste volume in cubic meters")
-    severity_score: float = Field(ge=0.0, le=10.0, description="Severity score from 0 (minor) to 10 (critical)")
-    detected_tags: List[str] = Field(default_factory=list, description="Specific identified waste items/hazards")
-    recommended_action: str = Field(description="Recommended collection action")
-    is_fallback: bool = Field(default=False, description="True if computed via heuristic fallback engine")
+logger = logging.getLogger("wastewise.ai.cv_service")
 
 
 class ComputerVisionService:
     """
     Computer Vision Service for Waste Detection and Volumetric Estimation.
+    Supports real multimodal LLM vision providers with graceful heuristic fallback.
     """
 
     CATEGORIES = [
-        ("mixed", "Mixed Municipal Solid Waste", ["household_refuse", "plastic_wrappers", "food_scraps"]),
-        ("plastic", "Plastic & Polymer Packaging", ["plastic_bottles", "polybags", "packaging_containers"]),
-        ("organic", "Organic / Market Biomass", ["vegetable_waste", "spoiled_produce", "wet_waste"]),
-        ("construction", "Construction & Demolition Debris", ["concrete_chunks", "brick_rubble", "sand_debris"]),
-        ("e_waste", "Electronic / Electrical Waste", ["circuit_boards", "broken_appliances", "cables"]),
-        ("hazardous", "Hazardous / Bio-Medical Waste", ["chemical_containers", "medical_packaging", "aerosols"]),
+        (
+            "mixed",
+            "Mixed Municipal Solid Waste",
+            ["household_refuse", "plastic_wrappers", "food_scraps"],
+        ),
+        (
+            "plastic",
+            "Plastic & Polymer Packaging",
+            ["plastic_bottles", "polybags", "packaging_containers"],
+        ),
+        (
+            "organic",
+            "Organic / Market Biomass",
+            ["vegetable_waste", "spoiled_produce", "wet_waste"],
+        ),
+        (
+            "construction",
+            "Construction & Demolition Debris",
+            ["concrete_chunks", "brick_rubble", "sand_debris"],
+        ),
+        (
+            "e_waste",
+            "Electronic / Electrical Waste",
+            ["circuit_boards", "broken_appliances", "cables"],
+        ),
+        (
+            "hazardous",
+            "Hazardous / Bio-Medical Waste",
+            ["chemical_containers", "medical_packaging", "aerosols"],
+        ),
     ]
 
     @classmethod
@@ -44,19 +65,38 @@ class ComputerVisionService:
         cls,
         image_data: Optional[bytes] = None,
         image_url: Optional[str] = None,
+        mime_type: str = "image/jpeg",
         hint_category: Optional[str] = None,
     ) -> WasteAnalysisResult:
         """
         Analyze an image for waste classification and severity estimation.
-        Gracefully executes heuristic fallback path per ai_rules.md #7.
+        Attempts real Vision Provider first, gracefully executes heuristic fallback path on error or missing config.
         """
-        # If external model integration is configured (e.g. PyTorch / ONNX / Vision LLM), execute model path
-        try:
-            # Model inference placeholder for heavy model path:
-            return cls._execute_heuristic_analysis(image_data=image_data, image_url=image_url, hint_category=hint_category)
-        except Exception:
-            # Always fallback gracefully on error
-            return cls._execute_heuristic_analysis(image_data=image_data, image_url=image_url, hint_category=hint_category)
+        provider = get_vision_provider()
+        if provider and image_data:
+            try:
+                result = await provider.analyze_image(
+                    image_data=image_data,
+                    mime_type=mime_type,
+                    hint_category=hint_category,
+                )
+                logger.info(
+                    f"Successfully analyzed image using Vision AI Provider. "
+                    f"Category: {result.category}, Severity: {result.severity_score}"
+                )
+                return result
+            except Exception as e:
+                logger.warning(
+                    f"Vision AI Provider call failed: {type(e).__name__}. "
+                    f"Engaging deterministic heuristic fallback engine."
+                )
+
+        # Execute deterministic heuristic fallback path per ai_rules.md #7
+        return cls._execute_heuristic_analysis(
+            image_data=image_data,
+            image_url=image_url,
+            hint_category=hint_category,
+        )
 
     @classmethod
     def _execute_heuristic_analysis(
@@ -79,7 +119,9 @@ class ComputerVisionService:
 
         # Select category
         if hint_category and hint_category.lower() in [c[0] for c in cls.CATEGORIES]:
-            selected_cat = next(c for c in cls.CATEGORIES if c[0] == hint_category.lower())
+            selected_cat = next(
+                c for c in cls.CATEGORIES if c[0] == hint_category.lower()
+            )
         else:
             # Deterministic weighted distribution
             weights = [0.40, 0.25, 0.18, 0.10, 0.05, 0.02]

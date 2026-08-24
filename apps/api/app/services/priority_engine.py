@@ -13,7 +13,7 @@ Recalculates incident priority dynamically based on:
 
 import math
 from datetime import datetime, timezone
-from typing import Tuple, List
+from typing import List, Tuple
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,13 +24,33 @@ from app.models.entities import Incident, PriorityLevel, WasteCategory
 class DynamicPriorityEngine:
     # Sensitive locations in Gandhinagar / Ahmedabad for proximity scoring
     SENSITIVE_ZONES = [
-        {"name": "Civil Hospital Sector 12", "lat": 23.033, "lng": 72.586, "radius_m": 400, "bonus": 25},
-        {"name": "Sector 11 Central School", "lat": 23.024, "lng": 72.572, "radius_m": 300, "bonus": 20},
-        {"name": "APMC Vegetable Market", "lat": 23.045, "lng": 72.550, "radius_m": 500, "bonus": 20},
+        {
+            "name": "Civil Hospital Sector 12",
+            "lat": 23.033,
+            "lng": 72.586,
+            "radius_m": 400,
+            "bonus": 25,
+        },
+        {
+            "name": "Sector 11 Central School",
+            "lat": 23.024,
+            "lng": 72.572,
+            "radius_m": 300,
+            "bonus": 20,
+        },
+        {
+            "name": "APMC Vegetable Market",
+            "lat": 23.045,
+            "lng": 72.550,
+            "radius_m": 500,
+            "bonus": 20,
+        },
     ]
 
     @classmethod
-    def calculate_priority_score(cls, incident: Incident) -> Tuple[float, PriorityLevel, int]:
+    def calculate_priority_score(
+        cls, incident: Incident
+    ) -> Tuple[float, PriorityLevel, int]:
         """
         Compute continuous urgency score (0 - 100), PriorityLevel, and SLA remaining in minutes.
         """
@@ -65,8 +85,12 @@ class DynamicPriorityEngine:
         sensitive_bonus = 0.0
         for zone in cls.SENSITIVE_ZONES:
             dlat = (incident.latitude - zone["lat"]) * 111000.0
-            dlng = (incident.longitude - zone["lng"]) * 111000.0 * math.cos(math.radians(incident.latitude))
-            dist = math.sqrt(dlat ** 2 + dlng ** 2)
+            dlng = (
+                (incident.longitude - zone["lng"])
+                * 111000.0
+                * math.cos(math.radians(incident.latitude))
+            )
+            dist = math.sqrt(dlat**2 + dlng**2)
             if dist <= zone["radius_m"]:
                 sensitive_bonus += zone["bonus"]
                 break

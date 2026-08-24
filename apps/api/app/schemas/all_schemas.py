@@ -9,19 +9,20 @@ import uuid
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, EmailStr, Field, ConfigDict
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
+
 from app.models.entities import (
+    IncidentStatus,
+    PriorityLevel,
     UserRole,
     VehicleStatus,
-    PriorityLevel,
-    IncidentStatus,
     WasteCategory,
 )
-
 
 # ---------------------------------------------------------------------------
 # Auth & User Schemas
 # ---------------------------------------------------------------------------
+
 
 class UserRegisterRequest(BaseModel):
     email: EmailStr
@@ -73,6 +74,7 @@ class PasswordResetConfirm(BaseModel):
 # Vehicle Schemas
 # ---------------------------------------------------------------------------
 
+
 class VehicleCreate(BaseModel):
     plate_number: str = Field(min_length=3, max_length=50)
     vehicle_type: str = Field(default="compactor", max_length=50)
@@ -110,6 +112,7 @@ class VehicleRead(BaseModel):
 # Report Schemas
 # ---------------------------------------------------------------------------
 
+
 class ReportCreate(BaseModel):
     description: Optional[str] = Field(None, max_length=2000)
     category: Optional[str] = Field(None, max_length=50)
@@ -138,6 +141,7 @@ class ReportRead(BaseModel):
 # ---------------------------------------------------------------------------
 # Incident Schemas
 # ---------------------------------------------------------------------------
+
 
 class IncidentCreate(BaseModel):
     title: str = Field(min_length=3, max_length=255)
@@ -182,6 +186,7 @@ class IncidentRead(BaseModel):
 # Notification Schemas
 # ---------------------------------------------------------------------------
 
+
 class NotificationRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -192,3 +197,21 @@ class NotificationRead(BaseModel):
     notification_type: str
     is_read: bool
     created_at: datetime
+
+
+class WasteAnalysisResult(BaseModel):
+    category: str = Field(description="Primary detected waste type")
+    confidence: float = Field(ge=0.0, le=1.0, description="Detection confidence score")
+    estimated_volume_m3: float = Field(
+        ge=0.0, description="Estimated waste volume in cubic meters"
+    )
+    severity_score: float = Field(
+        ge=0.0, le=10.0, description="Severity score from 0 (minor) to 10 (critical)"
+    )
+    detected_tags: List[str] = Field(
+        default_factory=list, description="Specific identified waste items/hazards"
+    )
+    recommended_action: str = Field(description="Recommended collection action")
+    is_fallback: bool = Field(
+        default=False, description="True if computed via heuristic fallback engine"
+    )

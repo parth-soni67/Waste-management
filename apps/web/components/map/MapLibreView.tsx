@@ -115,6 +115,7 @@ export default function MapLibreView({
       map.current?.remove();
       map.current = null;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [center, zoom]);
 
   // Update Route Polyline when coordinates change dynamically (Loop C)
