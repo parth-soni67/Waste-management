@@ -126,6 +126,12 @@ class User(Base):
     notifications: Mapped[List["Notification"]] = relationship(
         "Notification", back_populates="user"
     )
+    collection_proofs: Mapped[List["CollectionProof"]] = relationship(
+        "CollectionProof", back_populates="driver"
+    )
+    driver_locations: Mapped[List["DriverLocation"]] = relationship(
+        "DriverLocation", back_populates="driver"
+    )
 
 
 class RefreshToken(Base):
@@ -250,6 +256,19 @@ class Incident(Base):
         ForeignKey("vehicles.id", ondelete="SET NULL"),
         nullable=True,
     )
+    started_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    completed_by_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    completion_latitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    completion_longitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
@@ -265,7 +284,13 @@ class Incident(Base):
     assigned_vehicle: Mapped[Optional["Vehicle"]] = relationship(
         "Vehicle", back_populates="incidents"
     )
+    completed_by: Mapped[Optional["User"]] = relationship(
+        "User", foreign_keys=[completed_by_id]
+    )
     reports: Mapped[List["Report"]] = relationship("Report", back_populates="incident")
+    proofs: Mapped[List["CollectionProof"]] = relationship(
+        "CollectionProof", back_populates="incident", cascade="all, delete-orphan"
+    )
 
 
 class Report(Base):
@@ -341,3 +366,70 @@ class Notification(Base):
     )
 
     user: Mapped["User"] = relationship("User", back_populates="notifications")
+
+
+class CollectionProof(Base):
+    __tablename__ = "collection_proofs"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), default=uuid.uuid4, primary_key=True
+    )
+    incident_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("incidents.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    driver_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    image_url: Mapped[str] = mapped_column(String(1000), nullable=False)
+    storage_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    latitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    longitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    accuracy: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    captured_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    uploaded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    verification_status: Mapped[str] = mapped_column(
+        String(50), default="VALID", nullable=False
+    )
+
+    incident: Mapped["Incident"] = relationship("Incident", back_populates="proofs")
+    driver: Mapped["User"] = relationship("User", back_populates="collection_proofs")
+
+
+class DriverLocation(Base):
+    __tablename__ = "driver_locations"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), default=uuid.uuid4, primary_key=True
+    )
+    driver_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    latitude: Mapped[float] = mapped_column(Float, nullable=False)
+    longitude: Mapped[float] = mapped_column(Float, nullable=False)
+    accuracy: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    heading: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    speed: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+        index=True,
+    )
+
+    driver: Mapped["User"] = relationship("User", back_populates="driver_locations")

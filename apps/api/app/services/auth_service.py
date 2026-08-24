@@ -41,7 +41,7 @@ class AuthService:
             hashed_password=hash_password(payload.password),
             full_name=payload.full_name,
             phone_number=payload.phone_number,
-            role=UserRole.CITIZEN,
+            role=payload.role if payload.role else UserRole.CITIZEN,
             is_active=True,
             is_verified=True,  # Auto-verified for hackathon demo
         )

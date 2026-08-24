@@ -168,18 +168,22 @@ async def get_optional_user(
         return None
 
 
-def require_role(*allowed_roles: str):
+def require_role(*allowed_roles):
     """
     RBAC dependency factory per security_guide.md §2.
     Usage: `current_user: TokenPayload = Depends(require_role("officer", "admin"))`
-
-    Server-side enforcement — never trust frontend role claims alone.
+    Handles strings, enums, and uppercase/lowercase matching robustly.
     """
+    normalized_allowed = {
+        r.value.upper() if hasattr(r, "value") else str(r).upper()
+        for r in allowed_roles
+    }
 
     async def role_checker(
         current_user: TokenPayload = Depends(get_current_user),
     ) -> TokenPayload:
-        if current_user.role not in allowed_roles:
+        user_role_str = str(current_user.role).upper()
+        if user_role_str not in normalized_allowed:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Insufficient permissions",

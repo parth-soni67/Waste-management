@@ -27,6 +27,8 @@ from app.routers.agent_router import router as agent_router
 from app.routers.ai_router import router as ai_router
 from app.routers.analytics_router import router as analytics_router
 from app.routers.auth import router as auth_router
+from app.routers.driver_router import incident_driver_router
+from app.routers.driver_router import router as driver_router
 from app.routers.incidents import (
     incidents_router,
     reports_router,
@@ -129,6 +131,8 @@ async def health_check():
 app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(vehicles_router, prefix="/api/v1/vehicles", tags=["vehicles"])
 app.include_router(incidents_router, prefix="/api/v1/incidents", tags=["incidents"])
+app.include_router(incident_driver_router, prefix="/api/v1", tags=["incidents"])
+app.include_router(driver_router, prefix="/api/v1", tags=["driver"])
 app.include_router(reports_router, prefix="/api/v1/reports", tags=["reports"])
 app.include_router(ai_router, prefix="/api/v1/ai", tags=["ai"])
 app.include_router(

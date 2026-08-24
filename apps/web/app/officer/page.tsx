@@ -139,12 +139,14 @@ interface FleetDriver {
 interface CitizenReportDetail {
   reportId: string;
   incidentId: string;
+  rawIncidentId?: string;
   reporterName: string;
   reporterPhone: string;
   description: string;
   address: string;
   category: string;
   photos: string[];
+  proofPhotos?: string[];
   submittedAt: string;
   aiCategory: string;
   aiConfidence: number;
@@ -390,6 +392,7 @@ export default function OfficerPage() {
           const mappedReports: CitizenReportDetail[] = repData.map((r: BackendReportItem) => ({
             reportId: `REP-${String(r.id).slice(0, 8).toUpperCase()}`,
             incidentId: r.incident_id ? `WW-${String(r.incident_id).slice(0, 8).toUpperCase()}` : `WW-${String(r.id).slice(0, 8).toUpperCase()}`,
+            rawIncidentId: r.incident_id ? String(r.incident_id) : String(r.id),
             reporterName: "Citizen Reporter",
             reporterPhone: "+91 98765 00000",
             description: r.description || "Reported municipal waste accumulation.",
@@ -1984,6 +1987,31 @@ export default function OfficerPage() {
                   </div>
                 )}
               </div>
+
+              {/* Driver Proof of Work Section (After Cleaning) */}
+              {selectedReportDetail.proofPhotos && selectedReportDetail.proofPhotos.length > 0 && (
+                <div className="p-4 rounded-2xl bg-emerald-50/80 border border-emerald-200">
+                  <h3 className="text-xs font-bold text-emerald-900 uppercase tracking-wide mb-3 flex items-center gap-1.5">
+                    <ShieldCheck className="w-4 h-4 text-emerald-700" />
+                    Verified Driver Collection Proof (After Cleaning)
+                  </h3>
+                  <div className="grid grid-cols-1 gap-3">
+                    {selectedReportDetail.proofPhotos.map((photo, i) => (
+                      <div key={`proof-photo-${i}`} className="relative rounded-xl overflow-hidden border border-emerald-300 shadow-sm bg-black">
+                        <img
+                          src={photo}
+                          alt={`Driver Proof ${i + 1}`}
+                          className="w-full h-56 object-cover"
+                        />
+                        <div className="absolute bottom-2 left-2 px-2.5 py-1 rounded-lg bg-emerald-900/80 text-white text-[10px] font-bold flex items-center gap-1.5">
+                          <Check className="w-3 h-3 text-emerald-400" />
+                          <span>Driver Proof Photo (Supabase Storage Verified)</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Reporter Information */}
               <div className="bg-slate-50 rounded-xl p-4 border border-slate-200 space-y-3">

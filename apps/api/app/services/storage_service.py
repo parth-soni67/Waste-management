@@ -116,3 +116,80 @@ class StorageService:
                 "storage_path": f"{BUCKET_NAME}/{object_path}",
                 "public_url": public_url,
             }
+
+    @staticmethod
+    async def upload_collection_proof(
+        contents: bytes,
+        driver_id: uuid.UUID,
+        incident_id: uuid.UUID,
+        mime_type: Optional[str] = None,
+    ) -> Dict[str, str]:
+        """
+        Validate, name uniquely, and upload driver after-cleaning proof photo to Supabase Storage.
+        Path structure: proofs/{driver_id}/{incident_id}/{timestamp}_{uuid}{ext}
+        """
+        detected_mime = detect_image_mime(contents)
+        final_mime = detected_mime or mime_type or "image/jpeg"
+        if final_mime not in ALLOWED_MIMES:
+            final_mime = "image/jpeg"
+
+        ext = ALLOWED_MIMES.get(final_mime, ".jpg")
+        now = datetime.now(timezone.utc)
+        unique_id = uuid.uuid4().hex[:8]
+        timestamp_str = now.strftime("%Y%m%d_%H%M%S")
+        object_path = (
+            f"proofs/{driver_id}/{incident_id}/{timestamp_str}_{unique_id}{ext}"
+        )
+
+        upload_url = (
+            f"{settings.SUPABASE_URL}/storage/v1/object/{BUCKET_NAME}/{object_path}"
+        )
+        public_url = f"{settings.SUPABASE_URL}/storage/v1/object/public/{BUCKET_NAME}/{object_path}"
+
+        headers = {
+            "apikey": settings.SUPABASE_ANON_KEY,
+            "Authorization": f"Bearer {settings.SUPABASE_ANON_KEY}",
+            "Content-Type": final_mime,
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                res = await client.post(upload_url, headers=headers, content=contents)
+                if res.status_code in (200, 201):
+                    logger.info(
+                        "Successfully uploaded collection proof: %s", object_path
+                    )
+                    return {
+                        "storage_path": f"{BUCKET_NAME}/{object_path}",
+                        "public_url": public_url,
+                    }
+                else:
+                    logger.warning(
+                        "Supabase storage returned status %s for proof: %s. Falling back to local storage.",
+                        res.status_code,
+                        res.text,
+                    )
+        except Exception as err:
+            logger.warning(
+                "Error uploading proof to Supabase Storage: %s. Engaging fallback.", err
+            )
+
+        try:
+            local_dir = os.path.join(
+                settings.UPLOAD_DIR, "proofs", str(driver_id), str(incident_id)
+            )
+            os.makedirs(local_dir, exist_ok=True)
+            local_file = os.path.join(local_dir, f"{timestamp_str}_{unique_id}{ext}")
+            with open(local_file, "wb") as f:
+                f.write(contents)
+            fallback_url = f"/uploads/proofs/{driver_id}/{incident_id}/{timestamp_str}_{unique_id}{ext}"
+            return {
+                "storage_path": f"local/{object_path}",
+                "public_url": fallback_url,
+            }
+        except Exception as local_err:
+            logger.error("Failed to save local fallback proof: %s", local_err)
+            return {
+                "storage_path": f"{BUCKET_NAME}/{object_path}",
+                "public_url": public_url,
+            }

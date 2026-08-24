@@ -287,3 +287,89 @@ class WasteAnalysisResult(BaseModel):
     storage_path: Optional[str] = Field(
         default=None, description="Persisted Supabase Storage object path"
     )
+
+
+# ---------------------------------------------------------------------------
+# Driver & Proof Schemas
+# ---------------------------------------------------------------------------
+
+
+class DriverLocationCreate(BaseModel):
+    latitude: float = Field(ge=-90.0, le=90.0)
+    longitude: float = Field(ge=-180.0, le=180.0)
+    accuracy: Optional[float] = None
+    heading: Optional[float] = None
+    speed: Optional[float] = None
+
+
+class DriverLocationRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    driver_id: uuid.UUID
+    latitude: float
+    longitude: float
+    accuracy: Optional[float] = None
+    heading: Optional[float] = None
+    speed: Optional[float] = None
+    recorded_at: datetime
+
+    @field_serializer("recorded_at")
+    def serialize_recorded_at(self, dt: datetime) -> str:
+        return _serialize_utc_iso(dt) or ""
+
+
+class CollectionProofRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    incident_id: uuid.UUID
+    driver_id: uuid.UUID
+    image_url: str
+    storage_path: str
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    accuracy: Optional[float] = None
+    captured_at: Optional[datetime] = None
+    uploaded_at: datetime
+    notes: Optional[str] = None
+    verification_status: str
+
+    @field_serializer("captured_at", "uploaded_at", check_fields=False)
+    def serialize_proof_dt(self, dt: Optional[datetime]) -> Optional[str]:
+        return _serialize_utc_iso(dt)
+
+
+class DriverAssignmentRead(BaseModel):
+    incident_id: uuid.UUID
+    incident_code: str
+    title: str
+    description: Optional[str] = None
+    priority: PriorityLevel
+    category: WasteCategory
+    severity_score: Optional[float] = None
+    estimated_volume_m3: Optional[float] = None
+    latitude: float
+    longitude: float
+    address: Optional[str] = None
+    status: IncidentStatus
+    assigned_at: datetime
+    created_at: datetime
+    updated_at: datetime
+    sla_minutes_left: int
+    sequence: int
+    vehicle_plate: Optional[str] = None
+    vehicle_capacity_kg: Optional[float] = None
+    vehicle_current_load_kg: Optional[float] = None
+    citizen_image_urls: List[str] = Field(default_factory=list)
+    proof_image_urls: List[str] = Field(default_factory=list)
+
+    @field_serializer("assigned_at", "created_at", "updated_at", check_fields=False)
+    def serialize_assignment_dt(self, dt: datetime) -> str:
+        return _serialize_utc_iso(dt) or ""
+
+
+class IncidentCompleteRequest(BaseModel):
+    latitude: Optional[float] = Field(None, ge=-90.0, le=90.0)
+    longitude: Optional[float] = Field(None, ge=-180.0, le=180.0)
+    notes: Optional[str] = None
