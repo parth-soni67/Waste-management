@@ -142,27 +142,65 @@ export default function CitizenPage() {
   };
 
   const executeClientFallback = (hintCat?: string) => {
-    const catMap: Record<string, string> = {
-      plastic: "Plastic & Polymer Packaging",
-      organic: "Organic / Market Biomass",
-      construction: "Construction & Demolition Debris",
-      e_waste: "Electronic / Electrical Waste",
-      hazardous: "Hazardous / Bio-Medical Waste",
-      mixed: "Mixed Municipal Solid Waste",
+    const catMap: Record<string, { label: string; tags: string[]; volume: number; severity: number; action: string }> = {
+      plastic: {
+        label: "PLASTIC",
+        tags: ["pet_bottles", "packaging_wrappers", "polybags"],
+        volume: 1.4,
+        severity: 4.8,
+        action: "Deploy Dry Recyclables Collection Crew",
+      },
+      organic: {
+        label: "ORGANIC",
+        tags: ["vegetable_peels", "food_scraps", "spoiled_produce"],
+        volume: 2.1,
+        severity: 6.2,
+        action: "Deploy Organic Waste Collection Crew (Within 4 Hours)",
+      },
+      construction: {
+        label: "CONSTRUCTION",
+        tags: ["concrete_rubble", "broken_bricks", "sand_pile"],
+        volume: 3.5,
+        severity: 6.0,
+        action: "Deploy Tipper Truck with Front Loader",
+      },
+      e_waste: {
+        label: "E_WASTE",
+        tags: ["discarded_pcbs", "broken_appliances", "insulated_cables"],
+        volume: 0.8,
+        severity: 5.5,
+        action: "Route to E-Waste Segregation & Recovery Facility",
+      },
+      hazardous: {
+        label: "HAZARDOUS",
+        tags: ["chemical_containers", "medical_blisters", "aerosol_cans"],
+        volume: 0.5,
+        severity: 8.8,
+        action: "Immediate HazMat Dispatch: Alert Environmental Officer",
+      },
+      mixed: {
+        label: "MIXED",
+        tags: ["unsegregated_pile", "household_litter", "packaging_debris"],
+        volume: 1.6,
+        severity: 5.2,
+        action: "Add Stop to Routine Scheduled Collection Route",
+      },
     };
-    const cat = catMap[hintCat?.toLowerCase() || ""] || "Mixed Municipal Solid Waste";
+    const def = catMap[hintCat?.toLowerCase() || "mixed"] || catMap.mixed;
     setAiAnalysis({
-      category: cat,
-      confidence: 0.92,
-      volumeM3: 2.4,
-      severityScore: hintCat === "hazardous" ? 9.2 : 6.8,
-      tags: ["overflow_bin", "street_spill", "unsegregated"],
-      recommendedAction: "Dispatch 5-Tonne Compactor (Scheduled Route)",
+      category: def.label,
+      confidence: 0.72,
+      volumeM3: def.volume,
+      severityScore: def.severity,
+      tags: def.tags,
+      recommendedAction: def.action,
       isFallback: true,
     });
   };
 
   const analyzePhotoBlob = async (blob: Blob, hintCat?: string) => {
+    // Reset previous AI analysis to ensure fresh response per image
+    setAiAnalysis(null);
     setAnalyzingImage(true);
     setAnalysisStatusText("Uploading image to WasteWise AI...");
 
@@ -184,10 +222,10 @@ export default function CitizenPage() {
       if (res.ok) {
         const data = await res.json();
         setAiAnalysis({
-          category: data.category?.toUpperCase() || "MIXED",
-          confidence: Number(data.confidence ?? 0.92),
-          volumeM3: Number(data.estimated_volume_m3 ?? 1.8),
-          severityScore: Number(data.severity_score ?? 6.5),
+          category: data.category ? data.category.toUpperCase() : "MIXED",
+          confidence: Number(data.confidence ?? 0.85),
+          volumeM3: Number(data.estimated_volume_m3 ?? 1.5),
+          severityScore: Number(data.severity_score ?? 5.0),
           tags: Array.isArray(data.detected_tags) ? data.detected_tags : [],
           recommendedAction: data.recommended_action || "Deploy municipal collection vehicle",
           isFallback: Boolean(data.is_fallback),
@@ -700,7 +738,7 @@ export default function CitizenPage() {
                         </div>
                       </div>
 
-                      {aiAnalysis.tags && aiAnalysis.tags.length > 0 && (
+                      {aiAnalysis.tags && aiAnalysis.tags.length > 0 ? (
                         <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
                           <span className="text-[10px] text-slate-500 font-semibold">Identified Tags:</span>
                           {aiAnalysis.tags.map((tag, idx) => (
@@ -708,6 +746,10 @@ export default function CitizenPage() {
                               #{tag}
                             </span>
                           ))}
+                        </div>
+                      ) : (
+                        <div className="mt-2.5 text-[10px] text-slate-500 italic">
+                          No specific visual tags detected
                         </div>
                       )}
 

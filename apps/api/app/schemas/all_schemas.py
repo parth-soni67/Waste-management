@@ -227,6 +227,10 @@ class NotificationRead(BaseModel):
 
 
 class WasteAnalysisResult(BaseModel):
+    analysis_id: uuid.UUID = Field(
+        default_factory=uuid.uuid4,
+        description="Unique trace ID for this specific image analysis request",
+    )
     category: str = Field(description="Primary detected waste type")
     confidence: float = Field(ge=0.0, le=1.0, description="Detection confidence score")
     estimated_volume_m3: float = Field(

@@ -7,6 +7,7 @@ import base64
 import json
 import logging
 import re
+import uuid
 from typing import Optional
 
 import httpx
@@ -30,15 +31,17 @@ ALLOWED_CATEGORIES = {
 }
 
 SYSTEM_INSTRUCTION = """You are WasteWise AI's specialized municipal Computer Vision engine for Smart India Hackathon 2026.
+You are analyzing the exact municipal waste image provided in this request. Do not use example values. Do not assume the contents of previous requests. Determine all fields exclusively from the current image.
+
 Analyze the provided image of municipal waste and return ONLY a valid JSON object matching the following specification:
 
 {
   "category": "<one of: mixed, plastic, organic, construction, e_waste, hazardous, paper, metal, glass, other>",
-  "confidence": <float from 0.0 to 1.0 representing classification confidence>,
-  "estimated_volume_m3": <float >= 0.1 representing estimated physical volume in cubic meters>,
+  "confidence": <float from 0.0 to 1.0 representing classification confidence for this specific image>,
+  "estimated_volume_m3": <float >= 0.1 representing estimated physical volume in cubic meters from the visible waste pile scale>,
   "severity_score": <float from 0.0 (minor litter) to 10.0 (critical accumulation/hazard)>,
-  "detected_tags": [<list of 2 to 5 short strings describing specific items or hazards, e.g. "plastic_bottles", "drain_overflow", "market_refuse">],
-  "recommended_action": "<actionable municipal dispatch instruction, e.g. 'Deploy 5-Tonne Compactor Truck within 2 Hours'>"
+  "detected_tags": [<list of 2 to 6 specific strings describing distinct items/materials visible in THIS image, e.g. "pet_bottles", "vegetable_peels", "concrete_rubble">],
+  "recommended_action": "<specific actionable municipal dispatch action, e.g. 'Deploy 5-Tonne Compactor Truck within 2 Hours'>"
 }
 
 Guidelines:
@@ -60,11 +63,11 @@ class GeminiVisionProvider(VisionProvider):
     def __init__(
         self,
         api_key: str,
-        model: str = "gemini-3.6-flash",
+        model: str = "gemini-2.5-flash",
         timeout_seconds: float = 25.0,
     ):
         self.api_key = api_key
-        self.model = model or "gemini-3.6-flash"
+        self.model = model or "gemini-2.5-flash"
         self.timeout_seconds = timeout_seconds
 
     async def analyze_image(
@@ -79,11 +82,18 @@ class GeminiVisionProvider(VisionProvider):
         if not self.api_key:
             raise ValueError("Gemini API key is not configured")
 
+        logger.info("AI provider selected: gemini")
+        logger.info(f"AI model selected: {self.model}")
+        logger.info("AI analysis started")
+
         b64_image = base64.b64encode(image_data).decode("utf-8")
 
-        prompt = "Analyze this municipal waste photo and generate the structured JSON assessment."
+        prompt = (
+            "Analyze the attached municipal waste image and generate the structured JSON assessment. "
+            "Determine all values strictly from the visual contents of this specific image."
+        )
         if hint_category:
-            prompt += f" User provided hint category: '{hint_category}'."
+            prompt += f" Citizen provided category hint: '{hint_category}'."
 
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
 
@@ -102,7 +112,7 @@ class GeminiVisionProvider(VisionProvider):
                 }
             ],
             "generationConfig": {
-                "temperature": 0.2,
+                "temperature": 0.1,
                 "maxOutputTokens": 1024,
                 "responseMimeType": "application/json",
             },
@@ -126,7 +136,9 @@ class GeminiVisionProvider(VisionProvider):
                 raise ValueError("Gemini candidate has no content parts")
 
             raw_text = content_parts[0].get("text", "").strip()
-            return self._parse_and_validate_response(raw_text)
+            result = self._parse_and_validate_response(raw_text)
+            logger.info("AI analysis completed")
+            return result
 
     def _parse_and_validate_response(self, raw_text: str) -> WasteAnalysisResult:
         """
@@ -166,6 +178,7 @@ class GeminiVisionProvider(VisionProvider):
             recommended_action = "Deploy municipal collection vehicle to location"
 
         return WasteAnalysisResult(
+            analysis_id=uuid.uuid4(),
             category=category,
             confidence=round(confidence, 2),
             estimated_volume_m3=volume,

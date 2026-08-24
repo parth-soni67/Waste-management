@@ -57,7 +57,7 @@ class Settings(BaseSettings):
     # --- AI/ML (Vision / LLM) ---
     LLM_PROVIDER: str = "gemini"
     LLM_API_KEY: str = ""
-    LLM_MODEL: str = "gemini-3.6-flash"
+    LLM_MODEL: str = "gemini-2.5-flash"
     AI_TIMEOUT_SECONDS: float = 25.0
 
     # --- Supabase (Auth, Storage & Database) ---
