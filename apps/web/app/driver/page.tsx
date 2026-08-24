@@ -23,8 +23,11 @@ import {
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useAuth } from "@/lib/auth-context";
+import { EvidenceImage } from "@/components/ui/EvidenceImage";
 import type { DriverMapIncident } from "./DriverMap";
+
 import CameraCaptureModal from "./CameraCaptureModal";
+import { fetchRoadRoute, formatRouteDistance, formatRouteEta } from "@/lib/services/mapboxService";
 
 // Dynamically import MapLibre Component (disable SSR)
 const DriverMap = dynamic(() => import("./DriverMap"), {
@@ -79,7 +82,18 @@ export interface CollectionProofItem {
   verification_status: string;
 }
 
+function getImageUrl(url: string | null | undefined): string {
+
+  if (!url) return "";
+  if (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("data:") || url.startsWith("blob:")) {
+    return url;
+  }
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  return `${apiUrl}${url.startsWith("/") ? "" : "/"}${url}`;
+}
+
 function computeHaversineDistance(
+
   lat1: number,
   lon1: number,
   lat2: number,
@@ -125,8 +139,11 @@ export default function DriverPage() {
   const [activeIncidentId, setActiveIncidentId] = useState<string | null>(null);
   const [isFetching, setIsFetching] = useState<boolean>(false);
 
-  // Driver GPS Location
-  const [driverLocation, setDriverLocation] = useState<{ lat: number; lng: number } | null>(null);
+  // Driver GPS Location & Heading Telemetry (Default to Municipal Depot coordinates)
+  const defaultLocation = { lat: 23.025, lng: 72.578 };
+  const [driverLocation, setDriverLocation] = useState<{ lat: number; lng: number }>(defaultLocation);
+  const [locationHeading, setLocationHeading] = useState<number>(0);
+  const [locationSpeed, setLocationSpeed] = useState<number>(0);
   const [locationAccuracy, setLocationAccuracy] = useState<number | null>(null);
   const [isGpsAcquiring, setIsGpsAcquiring] = useState<boolean>(true);
   const lastSyncedLocRef = useRef<{ lat: number; lng: number } | null>(null);
@@ -135,6 +152,7 @@ export default function DriverPage() {
   const [routeGeometry, setRouteGeometry] = useState<[number, number][]>([]);
   const [distanceMeters, setDistanceMeters] = useState<number | null>(null);
   const [etaMinutes, setEtaMinutes] = useState<number | null>(null);
+  const [routeProvider, setRouteProvider] = useState<"Mapbox" | "OSRM" | "Haversine">("Mapbox");
   const [routeError, setRouteError] = useState<boolean>(false);
 
   // Proof of Work & Camera Modal
@@ -173,7 +191,6 @@ export default function DriverPage() {
         setAssignments(data);
 
         if (data.length > 0) {
-          // Keep active incident or default to first pending in sequence
           setActiveIncidentId((prev) => {
             if (prev && data.some((d) => d.incident_id === prev && d.status !== "COLLECTED")) {
               return prev;
@@ -182,7 +199,6 @@ export default function DriverPage() {
             return active ? active.incident_id : data[0].incident_id;
           });
 
-          // Sync vehicle metadata
           if (data[0].vehicle_plate) {
             setVehicleInfo({
               plate: data[0].vehicle_plate,
@@ -194,8 +210,8 @@ export default function DriverPage() {
           setActiveIncidentId(null);
         }
       }
-    } catch (err) {
-      console.warn("Failed to fetch driver assignments", err);
+    } catch (e) {
+      console.warn("Could not connect to Supabase backend", e);
     } finally {
       setIsFetching(false);
     }
@@ -210,7 +226,7 @@ export default function DriverPage() {
     }
   }, [user, fetchAssignments]);
 
-  // 2. Real-Time Geolocation Tracking (watchPosition + single lock)
+  // 2. Real-Time Geolocation Tracking
   const refreshGpsLocation = useCallback(() => {
     if (typeof window === "undefined" || !("geolocation" in navigator)) {
       setIsGpsAcquiring(false);
@@ -219,9 +235,11 @@ export default function DriverPage() {
 
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        const { latitude, longitude, accuracy } = pos.coords;
+        const { latitude, longitude, accuracy, heading, speed } = pos.coords;
         setDriverLocation({ lat: latitude, lng: longitude });
         setLocationAccuracy(accuracy);
+        if (heading !== null && heading !== undefined) setLocationHeading(heading);
+        if (speed !== null && speed !== undefined) setLocationSpeed(Math.round(speed * 3.6));
         setIsGpsAcquiring(false);
       },
       (err) => {
@@ -247,9 +265,10 @@ export default function DriverPage() {
         const newLoc = { lat: latitude, lng: longitude };
         setDriverLocation(newLoc);
         setLocationAccuracy(accuracy);
+        if (heading !== null && heading !== undefined) setLocationHeading(heading);
+        if (speed !== null && speed !== undefined) setLocationSpeed(Math.round(speed * 3.6));
         setIsGpsAcquiring(false);
 
-        // Throttled sync to backend every ~10s or 50m change
         const lastSync = lastSyncedLocRef.current;
         if (
           !lastSync ||
@@ -286,7 +305,7 @@ export default function DriverPage() {
     };
   }, [apiUrl, getAuthHeaders, refreshGpsLocation]);
 
-  // 3. Real Road Route Calculation (Mapbox / OSRM)
+  // 3. Real Road Route Calculation (Mapbox / OSRM via mapboxService)
   const computeRoute = useCallback(async () => {
     if (assignments.length === 0) {
       setRouteGeometry([]);
@@ -299,64 +318,29 @@ export default function DriverPage() {
     const activeInc = assignments.find((a) => a.incident_id === activeIncidentId) || assignments[0];
     if (!activeInc) return;
 
-    if (!driverLocation) {
-      setRouteGeometry([]);
-      setDistanceMeters(null);
-      setEtaMinutes(null);
-      setRouteError(false);
-      return;
-    }
+    const origin = [driverLocation.lng, driverLocation.lat];
+    const destination = [activeInc.longitude, activeInc.latitude];
 
-    const startLng = driverLocation.lng;
-    const startLat = driverLocation.lat;
-    const endLng = activeInc.longitude;
-    const endLat = activeInc.latitude;
+    console.log("📍 ROUTE ORIGIN [lng, lat]:", origin);
+    console.log("🎯 ROUTE DESTINATION [lng, lat]:", destination);
 
-    const directDistM = computeHaversineDistance(startLat, startLng, endLat, endLng);
-    const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
+    const res = await fetchRoadRoute(
+      driverLocation,
+      { lat: activeInc.latitude, lng: activeInc.longitude }
+    );
 
-    // Try Mapbox Directions API if configured
-    if (mapboxToken) {
-      try {
-        const mbUrl = `https://api.mapbox.com/directions/v5/mapbox/driving/${startLng},${startLat};${endLng},${endLat}?geometries=geojson&overview=full&steps=true&access_token=${mapboxToken}`;
-        const res = await fetch(mbUrl);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.routes && data.routes.length > 0) {
-            const route = data.routes[0];
-            setRouteGeometry(route.geometry.coordinates as [number, number][]);
-            setDistanceMeters(Math.round(route.distance));
-            setEtaMinutes(Math.max(1, Math.round(route.duration / 60.0)));
-            setRouteError(false);
-            return;
-          }
-        }
-      } catch {}
-    }
+    console.log("🛣️ ROUTE RESPONSE:", res);
+    console.log("📐 ROUTE GEOMETRY COORDINATES COUNT:", res.coordinates.length);
+    console.log("📏 ROUTE DISTANCE (METERS):", res.distanceMeters);
+    console.log("⏱️ ROUTE DURATION (SECONDS):", res.durationSeconds);
 
-    // Try Public OSRM Directions
-    try {
-      const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${startLng},${startLat};${endLng},${endLat}?overview=full&geometries=geojson`;
-      const res = await fetch(osrmUrl);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.routes && data.routes.length > 0) {
-          const route = data.routes[0];
-          setRouteGeometry(route.geometry.coordinates as [number, number][]);
-          setDistanceMeters(Math.round(route.distance));
-          setEtaMinutes(Math.max(1, Math.round(route.duration / 60.0)));
-          setRouteError(false);
-          return;
-        }
-      }
-    } catch {}
-
-    // Fallback to direct geometric bearing
-    setRouteGeometry([[startLng, startLat], [endLng, endLat]]);
-    setDistanceMeters(Math.round(directDistM));
-    setEtaMinutes(Math.max(1, Math.round((directDistM / 1000.0 / 25.0) * 60.0))); // ~25 km/h urban speed
-    setRouteError(true);
+    setRouteGeometry(res.coordinates);
+    setDistanceMeters(res.distanceMeters);
+    setEtaMinutes(Math.max(1, Math.round(res.durationSeconds / 60.0)));
+    setRouteProvider(res.source === "mapbox" ? "Mapbox" : res.source === "osrm" ? "OSRM" : "Haversine");
+    setRouteError(Boolean(res.error));
   }, [driverLocation, assignments, activeIncidentId]);
+
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -798,13 +782,25 @@ export default function DriverPage() {
             <div className="bg-white p-2 sm:p-3 rounded-3xl border border-slate-200 shadow-sm">
               <div className="h-[460px] sm:h-[540px] w-full rounded-2xl overflow-hidden">
                 <DriverMap
-                  driverLocation={driverLocation}
+                  driverLocation={
+                    driverLocation
+                      ? {
+                          lat: driverLocation.lat,
+                          lng: driverLocation.lng,
+                          heading: locationHeading,
+                          speed: locationSpeed,
+                        }
+                      : null
+                  }
+                  vehicleRegistration={vehicleInfo.plate}
                   assignments={mapIncidents}
                   activeIncidentId={activeIncidentId}
                   onSelectIncident={(id) => setActiveIncidentId(id)}
                   routeGeometry={routeGeometry}
+                  routeProvider={routeProvider}
                   routeError={routeError}
                   onRetryRoute={computeRoute}
+
                 />
               </div>
             </div>
@@ -959,13 +955,13 @@ export default function DriverPage() {
                   <div>
                     <span className="text-[10px] font-semibold text-slate-400 block">Distance</span>
                     <span className="text-xs sm:text-sm font-black text-slate-800">
-                      {distanceMeters !== null ? formatDistanceDisplay(distanceMeters) : "Acquiring..."}
+                      {formatRouteDistance(distanceMeters)}
                     </span>
                   </div>
                   <div>
                     <span className="text-[10px] font-semibold text-slate-400 block">ETA</span>
                     <span className="text-xs sm:text-sm font-black text-emerald-700">
-                      {etaMinutes !== null ? formatEtaDisplay(etaMinutes) : "Calculating..."}
+                      {formatRouteEta(etaMinutes, true)}
                     </span>
                   </div>
                   <div>
@@ -979,16 +975,17 @@ export default function DriverPage() {
                   </div>
                 </div>
 
-                {/* Volume Sourcing Badge */}
-                <div className="flex items-center justify-between text-[11px] bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200">
-                  <span className="text-slate-500 font-medium">Volume Calculation:</span>
-                  <span className="font-bold text-slate-800 flex items-center gap-1">
-                    <Layers className="w-3 h-3 text-emerald-600" />
-                    {currentAssignment.volume_source === "CLUSTER_AGGREGATE"
-                      ? `Cluster Aggregated (${currentAssignment.report_count || 1} reports)`
-                      : "AI Vision Estimate"}
+                {/* Route Engine & Volume Sourcing Badge */}
+                <div className="flex items-center justify-between text-[11px] bg-emerald-50/70 px-3 py-1.5 rounded-xl border border-emerald-200/80">
+                  <span className="text-emerald-900 font-bold flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse" />
+                    <span>Route Engine:</span>
+                  </span>
+                  <span className="font-extrabold text-emerald-800 flex items-center gap-1">
+                    🟢 Optimized Route ({process.env.NEXT_PUBLIC_MAPBOX_TOKEN ? "Mapbox" : "OSRM"})
                   </span>
                 </div>
+
 
                 {/* Primary Citizen Report Photo(s) */}
                 {currentAssignment.primary_image_urls && currentAssignment.primary_image_urls.length > 0 && (
@@ -1004,16 +1001,15 @@ export default function DriverPage() {
                     </div>
                     <div className="flex gap-2.5 overflow-x-auto pb-1">
                       {currentAssignment.primary_image_urls.map((url, i) => (
-                        <a
-                          key={`prim-${i}`}
-                          href={url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="block relative w-20 h-20 rounded-xl overflow-hidden border-2 border-amber-300 shrink-0 shadow-xs hover:opacity-90 transition-opacity"
-                        >
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={url} alt="Primary citizen report" className="w-full h-full object-cover" />
-                        </a>
+                        <div key={`prim-${i}`} className="w-20 h-20 shrink-0">
+                          <EvidenceImage
+                            src={url}
+                            alt={`Primary citizen report photo #${i + 1}`}
+                            variant="thumbnail"
+                            objectFit="cover"
+                            className="w-20 h-20 border-2 border-amber-300 shadow-xs"
+                          />
+                        </div>
                       ))}
                     </div>
                   </div>
@@ -1033,16 +1029,15 @@ export default function DriverPage() {
                     </div>
                     <div className="flex gap-2.5 overflow-x-auto pb-1">
                       {currentAssignment.cluster_image_urls.map((url, i) => (
-                        <a
-                          key={`clust-${i}`}
-                          href={url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="block relative w-20 h-20 rounded-xl overflow-hidden border-2 border-blue-300 shrink-0 shadow-xs hover:opacity-90 transition-opacity"
-                        >
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={url} alt="Clustered report evidence" className="w-full h-full object-cover" />
-                        </a>
+                        <div key={`clust-${i}`} className="w-20 h-20 shrink-0">
+                          <EvidenceImage
+                            src={url}
+                            alt={`Clustered report evidence photo #${i + 1}`}
+                            variant="thumbnail"
+                            objectFit="cover"
+                            className="w-20 h-20 border-2 border-blue-300 shadow-xs"
+                          />
+                        </div>
                       ))}
                     </div>
                   </div>
@@ -1058,20 +1053,20 @@ export default function DriverPage() {
                       </span>
                       <div className="flex gap-2 overflow-x-auto">
                         {currentAssignment.citizen_image_urls.map((url, i) => (
-                          <a
-                            key={i}
-                            href={url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="block relative w-16 h-16 rounded-xl overflow-hidden border border-amber-200 shrink-0"
-                          >
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={url} alt="Citizen report" className="w-full h-full object-cover" />
-                          </a>
+                          <div key={i} className="w-16 h-16 shrink-0">
+                            <EvidenceImage
+                              src={url}
+                              alt={`Citizen report photo #${i + 1}`}
+                              variant="thumbnail"
+                              objectFit="cover"
+                              className="w-16 h-16 border border-amber-200"
+                            />
+                          </div>
                         ))}
                       </div>
                     </div>
                   )}
+
 
                 {/* Collection Workflow Stepper */}
                 <div className="pt-2 border-t border-slate-100 space-y-3">
@@ -1130,17 +1125,19 @@ export default function DriverPage() {
                       {/* Selected Image Preview & Upload Button */}
                       {proofPreviewUrl && (
                         <div className="space-y-2 pt-2 border-t border-slate-200">
-                          <div className="relative w-full h-36 rounded-xl overflow-hidden border border-slate-200 bg-black">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={proofPreviewUrl}
-                              alt="Proof preview"
-                              className="w-full h-full object-contain"
-                            />
-                            <div className="absolute top-2 right-2 px-2 py-0.5 rounded bg-black/70 text-white text-[10px] font-bold">
-                              Selected Proof
-                            </div>
-                          </div>
+                          <EvidenceImage
+                            src={proofPreviewUrl}
+                            alt="Selected proof photo preview"
+                            variant="preview"
+                            objectFit="contain"
+                            className="h-36 border border-slate-200"
+                            badge={
+                              <span className="px-2 py-0.5 rounded bg-black/70 text-white text-[10px] font-bold">
+                                Selected Proof
+                              </span>
+                            }
+                          />
+
 
                           {/* GPS Proximity Check Tag */}
                           <div className="p-2 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-between text-[11px]">
@@ -1181,13 +1178,14 @@ export default function DriverPage() {
                             </div>
                           </div>
                           <a
-                            href={uploadedProof.image_url}
+                            href={getImageUrl(uploadedProof.image_url)}
                             target="_blank"
                             rel="noreferrer"
                             className="text-[11px] font-bold text-emerald-800 underline"
                           >
                             View
                           </a>
+
                         </div>
                       )}
 

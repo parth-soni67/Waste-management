@@ -189,6 +189,13 @@ class ReportRead(BaseModel):
         return _serialize_utc_iso(dt) or ""
 
 
+class ReportUpdate(BaseModel):
+    status: Optional[IncidentStatus] = None
+    officer_notes: Optional[str] = Field(None, max_length=1000)
+    assigned_vehicle_id: Optional[uuid.UUID] = None
+
+
+
 # ---------------------------------------------------------------------------
 # Incident Schemas
 # ---------------------------------------------------------------------------

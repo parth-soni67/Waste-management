@@ -441,3 +441,74 @@ async def test_clustered_incident_timestamp_and_relative_time_thresholds(
         assert format_relative_time_spec(120) == "2m ago"
         assert format_relative_time_spec(7200) == "2h ago"
         assert format_relative_time_spec(259200) == "3d ago"
+
+
+@pytest.mark.asyncio
+async def test_officer_approval_updates_citizen_report_status(officer_token, citizen_token):
+    """
+    Verify that when an officer approves/completes a report via PATCH /api/v1/reports/{report_id},
+    the report status in DB updates to COMPLETED and subsequent GETs reflect COMPLETED.
+    Also verify officer rejection updates report status to REJECTED.
+    """
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # 1. Citizen creates a report
+        res_create = await client.post(
+            "/api/v1/reports",
+            json={
+                "category": "mixed",
+                "severity_score": 6.0,
+                "latitude": 23.6956,
+                "longitude": 72.5475,
+                "description": "mantra loves",
+                "address_text": "Sector 12 Civil Hospital, Gandhinagar",
+            },
+            headers={"Authorization": f"Bearer {citizen_token}"},
+        )
+        assert res_create.status_code == 201
+        report_data = res_create.json()
+        report_id = report_data["id"]
+        short_id = f"REP-{report_id[:8].upper()}"
+
+        # 2. Verify initial status is REPORTED
+        assert report_data["status"] == "REPORTED"
+
+        # 3. Officer approves/completes the report using short REP- ID prefix or raw UUID
+        res_patch = await client.patch(
+            f"/api/v1/reports/{short_id}",
+            json={"status": "COMPLETED", "officer_notes": "Verified and approved by municipal officer"},
+            headers={"Authorization": f"Bearer {officer_token}"},
+        )
+        assert res_patch.status_code == 200
+        patched_data = res_patch.json()
+        assert patched_data["status"] == "COMPLETED"
+
+        # 4. Fetch list of reports and verify report status is COMPLETED
+        res_list = await client.get("/api/v1/reports", headers={"Authorization": f"Bearer {officer_token}"})
+        assert res_list.status_code == 200
+        reports_list = res_list.json()
+        matching_report = next((r for r in reports_list if r["id"] == report_id), None)
+        assert matching_report is not None
+        assert matching_report["status"] == "COMPLETED"
+
+        # 5. Officer rejects another report and verify status is REJECTED
+        res_create2 = await client.post(
+            "/api/v1/reports",
+            json={
+                "category": "plastic",
+                "severity_score": 4.0,
+                "latitude": 23.6960,
+                "longitude": 72.5480,
+                "description": "Test report for rejection",
+            },
+            headers={"Authorization": f"Bearer {citizen_token}"},
+        )
+        report2_id = res_create2.json()["id"]
+
+        res_reject = await client.patch(
+            f"/api/v1/reports/{report2_id}",
+            json={"status": "REJECTED", "officer_notes": "Duplicate entry"},
+            headers={"Authorization": f"Bearer {officer_token}"},
+        )
+        assert res_reject.status_code == 200
+        assert res_reject.json()["status"] == "REJECTED"

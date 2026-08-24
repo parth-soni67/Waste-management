@@ -48,21 +48,42 @@ import {
   Lock,
 } from "lucide-react";
 import Link from "next/link";
-import { useAuth } from "@/lib/auth-context";
-import { formatRelativeTime, getElapsedMinutes, parseUtcDate } from "@/app/lib/timeAgo";
-import type { MapPoint } from "@/components/map/MapLibreView";
 
-// Dynamically import MapLibre for SSR safety
-const MapLibreView = dynamic(() => import("@/components/map/MapLibreView"), {
+import { useAuth } from "@/lib/auth-context";
+import { EvidenceImage } from "@/components/ui/EvidenceImage";
+import { resolveImageUrl } from "@/lib/utils/imageUtils";
+import { formatRelativeTime, getElapsedMinutes, parseUtcDate } from "@/app/lib/timeAgo";
+
+import type {
+  AdminVehicle,
+  AdminIncident,
+  AdminHotspot,
+  AdminRoute,
+} from "@/components/map/AdminCommandMap";
+
+// Dynamically import Admin Command Center Map for SSR safety
+const AdminCommandMap = dynamic(() => import("@/components/map/AdminCommandMap"), {
   ssr: false,
   loading: () => (
-    <div className="w-full h-full min-h-[350px] rounded-2xl bg-slate-100 flex items-center justify-center text-slate-400 text-xs font-semibold">
-      Loading Spatial Map...
+    <div className="w-full h-full min-h-[460px] rounded-2xl bg-slate-900/90 flex flex-col items-center justify-center text-slate-400 gap-3 border border-slate-800">
+      <div className="w-8 h-8 border-3 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+      <span className="text-xs font-semibold text-slate-300">Initializing City-Wide Command Center Map...</span>
     </div>
   ),
 });
 
+
+function getImageUrl(url: string | null | undefined): string {
+  if (!url) return "";
+  if (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("data:") || url.startsWith("blob:")) {
+    return url;
+  }
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  return `${apiUrl}${url.startsWith("/") ? "" : "/"}${url}`;
+}
+
 interface IncidentItem {
+
   id: string;
   rawId?: string;
   title: string;
@@ -114,6 +135,15 @@ interface BackendReportItem {
   created_at?: string;
 }
 
+export interface MapPoint {
+  id: string;
+  lat: number;
+  lng: number;
+  title: string;
+  priority?: string;
+  type?: string;
+}
+
 interface FleetVehicle {
   id: string;
   rawId?: string;
@@ -125,7 +155,9 @@ interface FleetVehicle {
   driverId?: string;
   driverName?: string;
   driver?: string;
+  assignedIncidentId?: string;
   lat: number;
+
   lng: number;
   zone: string;
 }
@@ -142,9 +174,13 @@ interface FleetDriver {
 
 interface CitizenReportDetail {
   reportId: string;
+  rawReportId?: string;
   incidentId: string;
   rawIncidentId?: string;
+
+  title?: string;
   reporterName: string;
+
   reporterPhone: string;
   description: string;
   address: string;
@@ -457,8 +493,10 @@ export default function OfficerPage() {
         if (Array.isArray(repData) && repData.length > 0) {
           const mappedReports: CitizenReportDetail[] = repData.map((r: BackendReportItem) => ({
             reportId: `REP-${String(r.id).slice(0, 8).toUpperCase()}`,
+            rawReportId: String(r.id),
             incidentId: r.incident_id ? `WW-${String(r.incident_id).slice(0, 8).toUpperCase()}` : `WW-${String(r.id).slice(0, 8).toUpperCase()}`,
             rawIncidentId: r.incident_id ? String(r.incident_id) : String(r.id),
+
             reporterName: "Citizen Reporter",
             reporterPhone: "+91 98765 00000",
             description: r.description || "Reported municipal waste accumulation.",
@@ -581,6 +619,106 @@ export default function OfficerPage() {
       return filterTime === "LATEST" ? timeB - timeA : timeA - timeB;
     });
 
+  // City-Wide Spatial Command Center Map Datasets
+  const commandVehicles: AdminVehicle[] = useMemo(() => {
+    return vehicles.map((v) => ({
+      id: v.id,
+      plate: v.plate,
+      type: v.type,
+      status: (v.status as any) || "AVAILABLE",
+      lat: v.lat || 23.025,
+      lng: v.lng || 72.578,
+      heading: 45,
+      speed: v.status === "EN_ROUTE" || v.status === "COLLECTING" ? 28 : 0,
+      driver: v.driver || "Assigned Driver",
+      payloadKg: v.currentLoadKg,
+      capacityKg: v.capacityKg,
+      zone: v.zone,
+      nextStopName: v.assignedIncidentId ? `Stop ${v.assignedIncidentId}` : undefined,
+    }));
+  }, [vehicles]);
+
+  const commandIncidents: AdminIncident[] = useMemo(() => {
+    return incidents.map((inc) => ({
+      id: inc.id,
+      code: inc.id.startsWith("INC-") ? inc.id.replace("INC-", "WM-") : inc.id,
+      title: inc.title,
+      priority: inc.priority,
+      status: inc.status,
+      lat: inc.lat,
+      lng: inc.lng,
+      address: inc.sensitiveLocation || "Gandhinagar Municipal Sector",
+      category: inc.category,
+      reportsCount: inc.reportsCount,
+      slaMinutesLeft: inc.slaMinutesLeft,
+      isHospitalZone: Boolean(inc.sensitiveLocation?.includes("Hospital")) || inc.priority === "P0",
+      assignedVehiclePlate: inc.assignedTruck,
+    }));
+  }, [incidents]);
+
+  const commandHotspots: AdminHotspot[] = useMemo(() => [
+    {
+      id: "AI-HS-001",
+      code: "AI-PRED-801",
+      title: "Sector 21 Market High Overflow Risk",
+      lat: 23.2185,
+      lng: 72.6360,
+      confidence: 0.92,
+      predictedVolumeM3: 4.80,
+      riskLevel: "HIGH",
+      recommendedAction: "Pre-dispatch Truck GJ-01-WM-9120 by 06:00 AM",
+    },
+    {
+      id: "AI-HS-002",
+      code: "AI-PRED-802",
+      title: "GH-5 Bus Terminus Bin Overflow Risk",
+      lat: 23.2320,
+      lng: 72.6510,
+      confidence: 0.86,
+      predictedVolumeM3: 2.90,
+      riskLevel: "MEDIUM",
+      recommendedAction: "Route Mini Truck GJ-01-WM-8820",
+    },
+    {
+      id: "AI-HS-003",
+      code: "AI-PRED-803",
+      title: "InfoCity Commercial Gate 2 Overflow",
+      lat: 23.1970,
+      lng: 72.6280,
+      confidence: 0.81,
+      predictedVolumeM3: 3.50,
+      riskLevel: "HIGH",
+      recommendedAction: "Dispatch Compactor Truck",
+    },
+  ], []);
+
+  const commandRoutes: AdminRoute[] = useMemo(() => [
+    {
+      id: "route-v1",
+      vehicleId: "VEH-01",
+      vehiclePlate: "GJ-01-WM-4402",
+      coordinates: routeCoordinates.length > 0 ? routeCoordinates : [
+        [72.578, 23.025],
+        [72.586, 23.033],
+        [72.562, 23.018],
+        [72.548, 23.045],
+      ],
+      status: "ACTIVE",
+    },
+    {
+      id: "route-v2",
+      vehicleId: "VEH-02",
+      vehiclePlate: "GJ-01-WM-9120",
+      coordinates: [
+        [72.548, 23.045],
+        [72.555, 23.050],
+        [72.565, 23.040],
+      ],
+      status: "ACTIVE",
+    },
+  ], [routeCoordinates]);
+
+
   const handleDispatch = async (id: string) => {
     const incObj = incidents.find((i) => i.id === id || i.rawId === id);
     const targetRawId = incObj?.rawId || id.replace("WW-", "");
@@ -695,9 +833,13 @@ export default function OfficerPage() {
     }
   };
 
-  // Open report detail drawer for an incident
+  // Open report detail & driver proof inspection drawer for an incident
   const handleViewReports = (incidentId: string) => {
-    const reports = citizenReports.filter((r) => r.incidentId === incidentId || r.rawIncidentId === incidentId);
+    const targetInc = incidents.find((i) => i.id === incidentId || i.rawId === incidentId);
+    const rawIncId = targetInc?.rawId || (incidentId.startsWith("INC-") || incidentId.startsWith("WW-") || incidentId.startsWith("WM-") ? incidentId.replace(/^(INC|WW|WM)-/, "") : incidentId);
+
+    const reports = citizenReports.filter((r) => r.incidentId === incidentId || r.rawIncidentId === incidentId || r.rawIncidentId === rawIncId);
+    
     if (reports.length > 0) {
       const rep = reports[0];
       setSelectedReportDetail(rep);
@@ -705,11 +847,51 @@ export default function OfficerPage() {
       setOfficerActionNote("");
       setManualSeverity("DEFAULT");
       setManualTruck("AUTO");
+      void fetchDriverExecution(rep.rawIncidentId || rawIncId);
+      
+      // Auto-transition status from REPORTED -> UNDER_REVIEW in PostgreSQL when inspected
       if (rep.rawIncidentId) {
-        void fetchDriverExecution(rep.rawIncidentId);
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+        fetch(`${apiUrl}/api/v1/reports/${rep.rawIncidentId}`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            ...getAuthHeaders(),
+          },
+          body: JSON.stringify({ status: "UNDER_REVIEW" }),
+        }).catch((err) => console.warn("Failed to patch status to UNDER_REVIEW", err));
       }
+    } else {
+      // Synthetic report detail so driver proof drawer can open even if no citizen reports attached in state
+      const syntheticReport: CitizenReportDetail = {
+        reportId: `REP-${incidentId}`,
+        incidentId: incidentId,
+        rawIncidentId: rawIncId,
+        title: targetInc?.title || "Municipal Waste Collection Incident",
+        reporterName: "Municipal Citizen Alert System",
+        reporterPhone: "+91 98765 43210",
+        description: "Municipal Garbage Collection Site Verification & Proof of Work Inspection",
+        address: targetInc?.sensitiveLocation || "Gandhinagar Municipal Sector",
+        category: targetInc?.category || "Waste Overflow",
+        photos: [],
+        submittedAt: targetInc?.createdAt || new Date().toISOString(),
+        aiCategory: targetInc?.category || "Waste Overflow",
+        aiConfidence: 0.95,
+        aiSeverity: targetInc?.priority === "P0" ? 5 : targetInc?.priority === "P1" ? 4 : 3,
+        aiVolume: 3.5,
+        aiTags: ["Municipal Collection", "GPS Verified"],
+        aiRecommendedAction: "Verify driver post-cleaning photo proof and approve resolution",
+      };
+
+      setSelectedReportDetail(syntheticReport);
+      setReportDrawerOpen(true);
+      setOfficerActionNote("");
+      setManualSeverity("DEFAULT");
+      setManualTruck("AUTO");
+      void fetchDriverExecution(rawIncId);
     }
   };
+
 
   // Get all citizen reports for a given incident
   const getReportsForIncident = (incidentId: string) => {
@@ -726,8 +908,41 @@ export default function OfficerPage() {
       )
     );
 
-    const report = citizenReports.find((r) => r.reportId === reportId);
-    if (report && (action === "APPROVED" || action === "ESCALATED")) {
+    const report = citizenReports.find((r) => r.reportId === reportId || r.rawReportId === reportId);
+    const targetReportRawId = report?.rawReportId || selectedReportDetail?.rawReportId || reportId.replace(/^REP-/, "");
+
+    let targetReportStatus = "UNDER_REVIEW";
+    if (action === "APPROVED") {
+      targetReportStatus = "COMPLETED";
+    } else if (action === "REJECTED" || action === "DUPLICATE") {
+      targetReportStatus = "REJECTED";
+    } else if (action === "ESCALATED") {
+      targetReportStatus = "UNDER_REVIEW";
+    }
+
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+    // 1. Always patch report status first in PostgreSQL database
+    try {
+      await fetch(`${apiUrl}/api/v1/reports/${targetReportRawId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({
+          status: targetReportStatus,
+          officer_notes: officerActionNote || undefined,
+        }),
+      });
+    } catch (err) {
+      console.warn("Error patching report status", err);
+    }
+
+    // 2. If approved or escalated, update incident dispatch/priority
+    const targetIncidentRawId = report?.rawIncidentId || selectedReportDetail?.rawIncidentId || report?.incidentId?.replace(/^(WW|INC|WM)-/, "") || selectedReportDetail?.incidentId?.replace(/^(WW|INC|WM)-/, "");
+
+    if (action === "APPROVED" || action === "ESCALATED") {
       const priorityToSet = manualSeverity !== "DEFAULT" ? manualSeverity : action === "ESCALATED" ? "P0" : undefined;
       
       const selectedVeh = manualTruck !== "AUTO" 
@@ -738,7 +953,7 @@ export default function OfficerPage() {
       
       setIncidents((prev) =>
         prev.map((inc) => {
-          if (inc.id === report.incidentId || inc.rawId === report.rawIncidentId) {
+          if (inc.id === report?.incidentId || inc.rawId === targetIncidentRawId) {
             return {
               ...inc,
               ...(priorityToSet ? { priority: priorityToSet as IncidentItem["priority"] } : {}),
@@ -749,33 +964,34 @@ export default function OfficerPage() {
         })
       );
 
-      // Persist to Supabase backend
-      try {
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-        const patchPayload: Record<string, string | undefined> = {};
-        if (action === "APPROVED") {
-          patchPayload.status = "ASSIGNED";
-          if (selectedVeh?.rawId) {
-            patchPayload.assigned_vehicle_id = selectedVeh.rawId;
+      if (targetIncidentRawId) {
+        try {
+          const patchPayload: Record<string, string | undefined> = {};
+          if (action === "APPROVED") {
+            patchPayload.status = "ASSIGNED";
+            if (selectedVeh?.rawId) {
+              patchPayload.assigned_vehicle_id = selectedVeh.rawId;
+            }
           }
-        }
-        if (priorityToSet) patchPayload.priority = priorityToSet;
-        if (officerActionNote) patchPayload.description = officerActionNote;
+          if (priorityToSet) patchPayload.priority = priorityToSet;
+          if (officerActionNote) patchPayload.description = officerActionNote;
 
-        const targetRawId = report.rawIncidentId || report.incidentId.replace("WW-", "");
-        await fetch(`${apiUrl}/api/v1/incidents/${targetRawId}`, {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-            ...getAuthHeaders(),
-          },
-          body: JSON.stringify(patchPayload),
-        });
-        void fetchBackendData();
-      } catch (err) {
-        console.warn("Error patching incident", err);
+          await fetch(`${apiUrl}/api/v1/incidents/${targetIncidentRawId}`, {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              ...getAuthHeaders(),
+            },
+            body: JSON.stringify(patchPayload),
+          });
+        } catch (err) {
+          console.warn("Error patching incident", err);
+        }
       }
     }
+
+    void fetchBackendData();
+
 
     const actionLabels = { APPROVED: "Approved & Dispatched", ESCALATED: "Escalated to P0", REJECTED: "Rejected", DUPLICATE: "Marked Duplicate" };
     setSuccessToast(`✅ Report ${reportId}: ${actionLabels[action!] || action}`);
@@ -1260,64 +1476,31 @@ export default function OfficerPage() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left Col: Spatial Map & Pre-Deployment Controls (8 Cols) */}
         <div className="lg:col-span-7 xl:col-span-8 space-y-4">
-          <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
-            <div className="flex flex-wrap items-center justify-between gap-3 mb-3 px-1">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-bold text-slate-900">Spatial Intelligence Map</span>
-                <span className="text-[11px] font-bold text-teal-800 bg-teal-50 px-2 py-0.5 rounded-full border border-teal-200">
-                  {mapPoints.length} Live Nodes
-                </span>
-              </div>
-
-              {/* Map Layer Controls */}
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setShowHotspots(!showHotspots)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                    showHotspots
-                      ? "bg-amber-100 text-amber-900 border border-amber-300"
-                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                  }`}
-                >
-                  <Flame className="w-3.5 h-3.5 text-amber-700" />
-                  <span>Predicted Hotspots (AI)</span>
-                </button>
-              </div>
-            </div>
-
-            {/* MapLibre Spatial View */}
-            <div className="h-[420px] w-full rounded-xl overflow-hidden relative">
-              <MapLibreView
-                center={[72.5714, 23.03]}
-                zoom={12.8}
-                points={mapPoints}
-                routePolyline={routeCoordinates}
-                onSelectPoint={(p) => {
-                  const matchingInc = incidents.find((i) => i.id === p.id);
-                  if (matchingInc) setSelectedIncident(matchingInc);
+          <div className="bg-white rounded-3xl p-2 sm:p-3 border border-slate-200 shadow-sm">
+            <div className="h-[460px] sm:h-[540px] w-full rounded-2xl overflow-hidden relative">
+              <AdminCommandMap
+                vehicles={commandVehicles}
+                incidents={commandIncidents}
+                hotspots={commandHotspots}
+                routes={commandRoutes}
+                selectedIncidentId={selectedIncident?.id}
+                onSelectIncident={(adminInc) => {
+                  const match = incidents.find((i) => i.id === adminInc.id || i.id.replace("INC-", "WM-") === adminInc.code);
+                  if (match) setSelectedIncident(match);
                 }}
+                onSelectVehicle={(adminVeh) => {
+                  const matchVeh = vehicles.find((v) => v.id === adminVeh.id);
+                  if (matchVeh) {
+                    setSuccessToast(`🚛 Selected Fleet Unit: ${matchVeh.plate} (${matchVeh.driver || "Assigned Driver"})`);
+                    setTimeout(() => setSuccessToast(null), 3500);
+                  }
+                }}
+                zoneFilter={filterZone}
               />
-            </div>
-
-            <div className="flex flex-wrap items-center justify-between gap-3 mt-3 pt-3 border-t border-slate-100 text-xs text-slate-600">
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-[#C1272D]" />
-                  <span className="font-semibold text-slate-700">P0 Hospital Emergency</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-[#2B8C86]" />
-                  <span className="font-semibold text-slate-700">Municipal Truck</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-[#E86A33]" />
-                  <span className="font-semibold text-slate-700">AI Predicted Hotspot</span>
-                </div>
-              </div>
-              <span className="text-[11px] font-bold text-emerald-700">Route: TSP Optimized (OSRM Engine)</span>
             </div>
           </div>
         </div>
+
 
         {/* Right Col: Incident Triage Feed (4 Cols) */}
         <div className="lg:col-span-5 xl:col-span-4 bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex flex-col h-[500px]">
@@ -1425,19 +1608,19 @@ export default function OfficerPage() {
                         <Clock className="w-3.5 h-3.5 text-slate-400" />
                         <span>SLA: {inc.slaMinutesLeft}m left</span>
                       </div>
-                      {/* View Reports Button */}
-                      {getReportsForIncident(inc.id).length > 0 && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleViewReports(inc.id);
-                          }}
-                          className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 cursor-pointer transition-colors"
-                        >
-                          <Eye className="w-3 h-3" />
-                          {getReportsForIncident(inc.id).length} Reports
-                        </button>
-                      )}
+                      {/* View Reports & Driver Proof Button */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleViewReports(inc.id);
+                        }}
+                        className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-300 hover:bg-emerald-100 cursor-pointer transition-colors"
+                        title="Inspect Driver Photo Proof & Execution Details"
+                      >
+                        <ShieldCheck className="w-3 h-3 text-emerald-700" />
+                        <span>Driver Proof</span>
+                      </button>
+
                     </div>
 
                     {inc.status === "REPORTED" ? (
@@ -2156,21 +2339,24 @@ export default function OfficerPage() {
                   Photo Evidence ({selectedReportDetail.photos.length})
                 </h3>
                 {selectedReportDetail.photos.length > 0 ? (
-                  <div className="grid grid-cols-1 gap-3">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     {selectedReportDetail.photos.map((photo, i) => (
-                      <div key={`${selectedReportDetail.reportId}-photo-${i}`} className="relative rounded-xl overflow-hidden border border-slate-200 shadow-sm bg-slate-100">
-                        <img
-                          src={photo}
-                          alt={`Report ${selectedReportDetail.reportId} photo ${i + 1}`}
-                          className="w-full h-56 object-cover"
-                        />
-                        <div className="absolute bottom-2 left-2 px-2 py-0.5 rounded bg-black/60 text-white text-[10px] font-bold">
-                          Photo {i + 1} of {selectedReportDetail.photos.length}
-                        </div>
-                      </div>
+                      <EvidenceImage
+                        key={`${selectedReportDetail.reportId}-photo-${i}`}
+                        src={photo}
+                        alt={`Report ${selectedReportDetail.reportId} photo ${i + 1}`}
+                        variant="evidence"
+                        objectFit="contain"
+                        badge={
+                          <span className="px-2 py-0.5 rounded bg-black/70 text-white text-[9px] font-bold">
+                            Photo {i + 1} of {selectedReportDetail.photos.length}
+                          </span>
+                        }
+                      />
                     ))}
                   </div>
                 ) : (
+
                   <div className="p-6 rounded-xl border border-dashed border-slate-200 text-center text-slate-400 bg-slate-50">
                     <ImageIcon className="w-6 h-6 mx-auto mb-1.5 text-slate-300" />
                     <p className="text-xs font-semibold text-slate-600">No photo evidence uploaded</p>
@@ -2421,7 +2607,7 @@ export default function OfficerPage() {
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     {/* Before Image (Citizen Evidence) */}
-                    <div className="relative rounded-xl overflow-hidden border border-slate-700 bg-slate-950 flex flex-col justify-between">
+                    <div className="rounded-xl overflow-hidden border border-slate-700 bg-slate-950 flex flex-col justify-between">
                       <div className="p-2 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between">
                         <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1">
                           <AlertTriangle className="w-3 h-3" />
@@ -2429,29 +2615,25 @@ export default function OfficerPage() {
                         </span>
                         <span className="text-[9px] text-slate-400">Citizen Report</span>
                       </div>
-                      {selectedReportDetail.photos.length > 0 ? (
-                        <div className="relative group">
-                          <img
-                            src={selectedReportDetail.photos[0]}
-                            alt="Before cleaning evidence"
-                            className="w-full h-44 object-cover"
-                          />
-                          {selectedReportDetail.photos.length > 1 && (
-                            <div className="absolute bottom-2 left-2 px-2 py-0.5 rounded bg-black/70 text-white text-[9px] font-bold">
+                      <EvidenceImage
+                        src={selectedReportDetail.photos?.[0]}
+                        alt="Before cleaning citizen report photo"
+                        variant="evidence"
+                        objectFit="contain"
+                        badge={
+                          selectedReportDetail.photos.length > 1 ? (
+                            <span className="px-2 py-0.5 rounded bg-black/70 text-white text-[9px] font-bold">
                               + {selectedReportDetail.photos.length - 1} more photos
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="h-44 flex flex-col items-center justify-center p-4 text-center text-slate-500">
-                          <ImageIcon className="w-6 h-6 mb-1 text-slate-600" />
-                          <span className="text-[10px]">No citizen photo provided</span>
-                        </div>
-                      )}
+                            </span>
+                          ) : undefined
+                        }
+                        fallbackTitle="No Citizen Photo"
+                        fallbackDescription="Citizen submitted descriptive report without attachments"
+                      />
                     </div>
 
                     {/* After Image (Driver Proof of Work) */}
-                    <div className="relative rounded-xl overflow-hidden border border-slate-700 bg-slate-950 flex flex-col justify-between">
+                    <div className="rounded-xl overflow-hidden border border-slate-700 bg-slate-950 flex flex-col justify-between">
                       <div className="p-2 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between">
                         <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1">
                           <ShieldCheck className="w-3 h-3" />
@@ -2459,34 +2641,25 @@ export default function OfficerPage() {
                         </span>
                         <span className="text-[9px] text-slate-400">Driver Cockpit</span>
                       </div>
-                      {driverExecution?.proof ? (
-                        <div className="relative group">
-                          <img
-                            src={driverExecution.proof.image_url}
-                            alt="Post-cleaning driver proof"
-                            className="w-full h-44 object-cover cursor-pointer hover:opacity-90 transition-opacity"
-                            onClick={() => setFullProofModalUrl(driverExecution.proof?.image_url || null)}
-                          />
-                          <button
-                            onClick={() => setFullProofModalUrl(driverExecution.proof?.image_url || null)}
-                            className="absolute top-2 right-2 p-1.5 rounded-lg bg-black/60 text-white hover:bg-black/80 transition-colors cursor-pointer"
-                            title="Expand Full Proof Image"
-                          >
-                            <Eye className="w-3.5 h-3.5" />
-                          </button>
-                          <div className="absolute bottom-2 left-2 px-2 py-0.5 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-500/40 text-[9px] font-bold">
-                            Supabase Verified Photo
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="h-44 flex flex-col items-center justify-center p-4 text-center text-slate-500 bg-slate-950/50">
-                          <Truck className="w-6 h-6 mb-2 text-slate-600 animate-bounce" />
-                          <span className="text-xs font-semibold text-slate-400">Awaiting Driver Proof-of-Work</span>
-                          <span className="text-[10px] text-slate-500 mt-0.5">Photo capture compulsory for completion</span>
-                        </div>
-                      )}
+                      <EvidenceImage
+                        src={driverExecution?.proof?.image_url}
+                        alt="After cleaning driver proof of work photo"
+                        variant="evidence"
+                        objectFit="contain"
+                        badge={
+                          driverExecution?.proof ? (
+                            <span className="px-2 py-0.5 rounded bg-emerald-950/90 text-emerald-300 border border-emerald-500/40 text-[9px] font-bold flex items-center gap-1 shadow-xs">
+                              <ShieldCheck className="w-3 h-3 text-emerald-400" />
+                              Supabase Verified Photo
+                            </span>
+                          ) : undefined
+                        }
+                        fallbackTitle="Awaiting Driver Proof-of-Work"
+                        fallbackDescription="Photo capture compulsory before collection completion"
+                      />
                     </div>
                   </div>
+
                 </div>
 
                 {/* Proof Verification & Metadata Bar */}
@@ -2699,7 +2872,8 @@ export default function OfficerPage() {
       )}
 
       {/* FULL PROOF LIGHTBOX MODAL */}
-      {fullProofModalUrl && (
+      {Boolean(fullProofModalUrl && resolveImageUrl(fullProofModalUrl)) && (
+
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
           <div className="relative max-w-4xl w-full bg-slate-900 rounded-2xl overflow-hidden border border-slate-800 shadow-2xl">
             <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
@@ -2716,15 +2890,15 @@ export default function OfficerPage() {
             </div>
             <div className="p-4 flex items-center justify-center bg-black">
               <img
-                src={fullProofModalUrl}
+                src={getImageUrl(fullProofModalUrl)}
                 alt="Driver proof full resolution"
                 className="max-h-[75vh] w-auto object-contain rounded-lg"
               />
             </div>
             <div className="p-4 bg-slate-950 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
-              <span>Verified Supabase Storage Asset</span>
+              <span>Verified Storage Asset</span>
               <a
-                href={fullProofModalUrl}
+                href={getImageUrl(fullProofModalUrl)}
                 target="_blank"
                 rel="noreferrer"
                 className="text-emerald-400 hover:underline flex items-center gap-1"
@@ -2732,6 +2906,7 @@ export default function OfficerPage() {
                 Open Original in New Window <ArrowUpRight className="w-3.5 h-3.5" />
               </a>
             </div>
+
           </div>
         </div>
       )}

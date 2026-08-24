@@ -13,12 +13,15 @@ Mounts all versioned routers:
 - /api/v1/analytics (KPIs, environmental impact, smart alerts)
 """
 
+import os
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
+
 
 from app.core.config import settings
 from app.core.db import engine
@@ -66,6 +69,11 @@ app = FastAPI(
     version="0.4.0",
     lifespan=lifespan,
 )
+
+# Ensure uploads directory exists and mount static file server
+os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=settings.UPLOAD_DIR), name="uploads")
+
 
 
 # ---------------------------------------------------------------------------

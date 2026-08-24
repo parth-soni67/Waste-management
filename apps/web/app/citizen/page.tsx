@@ -23,7 +23,9 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
+import { EvidenceImage } from "@/components/ui/EvidenceImage";
 import { formatRelativeTime } from "@/app/lib/timeAgo";
+
 
 interface CitizenReport {
   id: string;
@@ -31,7 +33,7 @@ interface CitizenReport {
   category: string;
   description: string;
   address: string;
-  status: "REPORTED" | "ASSIGNED" | "COLLECTING" | "COLLECTED" | "VERIFIED" | "REOPENED";
+  status: "REPORTED" | "UNDER_REVIEW" | "ASSIGNED" | "COLLECTING" | "COLLECTED" | "VERIFIED" | "COMPLETED" | "REJECTED" | "REOPENED";
   priority: "P0" | "P1" | "P2" | "P3" | "P4";
   severityScore?: number;
   confidence?: number;
@@ -39,6 +41,7 @@ interface CitizenReport {
   createdAt: string;
   imageCount: number;
 }
+
 
 interface BackendReportItem {
   id: string;
@@ -318,7 +321,7 @@ export default function CitizenPage() {
     }
   };
 
-  // Fetch citizen reports from Supabase backend on load
+  // Fetch citizen reports from Supabase backend & auto-refresh every 4s
   useEffect(() => {
     const fetchPersistedReports = async () => {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -347,14 +350,15 @@ export default function CitizenPage() {
           }
         }
       } catch (err) {
-        console.warn("Backend reports fetch failed, using local fallback", err);
+        console.warn("Backend reports fetch failed", err);
       }
     };
-    const timer = setTimeout(() => {
-      void fetchPersistedReports();
-    }, 0);
-    return () => clearTimeout(timer);
+
+    void fetchPersistedReports();
+    const interval = setInterval(fetchPersistedReports, 4000);
+    return () => clearInterval(interval);
   }, [getAuthHeaders]);
+
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -672,24 +676,25 @@ export default function CitizenPage() {
                   {images.length > 0 && (
                     <div className="grid grid-cols-3 sm:grid-cols-5 gap-3 mb-4">
                       {images.map((url, i) => (
-                        <div
-                          key={i}
-                          className="relative group rounded-xl overflow-hidden aspect-square border border-slate-200 bg-slate-50"
-                        >
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
+                        <div key={i} className="relative group rounded-xl overflow-hidden aspect-square border border-slate-200 bg-slate-50">
+                          <EvidenceImage
                             src={url}
-                            alt="Uploaded evidence"
-                            className="w-full h-full object-cover"
+                            alt={`Uploaded evidence #${i + 1}`}
+                            variant="preview"
+                            objectFit="cover"
+                            aspectRatio="1/1"
+                            enableLightbox={true}
                           />
                           <button
                             type="button"
                             onClick={() => handleRemoveImage(i)}
-                            className="absolute top-1 right-1 p-1 bg-red-600 text-white rounded-full opacity-90 hover:opacity-100 shadow"
+                            className="absolute top-1 right-1 p-1 bg-red-600 hover:bg-red-700 text-white rounded-full opacity-90 hover:opacity-100 shadow-md transition-opacity cursor-pointer z-10"
+                            title="Remove photo"
                           >
                             <Trash2 className="w-3 h-3" />
                           </button>
                         </div>
+
                       ))}
                     </div>
                   )}
@@ -973,23 +978,37 @@ export default function CitizenPage() {
                 </p>
 
                 {/* Progress Steps */}
-                <div className="pt-4 border-t border-slate-100 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
+                <div className="pt-4 border-t border-slate-100 flex flex-col gap-2">
+                  <div className="flex items-center justify-between">
                     <span className="text-xs font-bold text-slate-700">Status:</span>
                     <span
-                      className={`text-xs font-bold px-2.5 py-1 rounded-md ${
-                        report.status === "VERIFIED"
-                          ? "bg-emerald-100 text-emerald-800"
-                          : report.status === "COLLECTING"
-                          ? "bg-teal-100 text-teal-800"
-                          : "bg-amber-100 text-amber-800"
+                      className={`text-xs font-bold px-2.5 py-1 rounded-md border flex items-center gap-1 ${
+                        report.status === "COMPLETED" || report.status === "VERIFIED" || report.status === "APPROVED"
+                          ? "bg-emerald-100 text-emerald-800 border-emerald-300"
+                          : report.status === "UNDER_REVIEW"
+                          ? "bg-blue-100 text-blue-800 border-blue-300"
+                          : report.status === "ASSIGNED" || report.status === "COLLECTING" || report.status === "COLLECTED"
+                          ? "bg-teal-100 text-teal-800 border-teal-300"
+                          : report.status === "REJECTED"
+                          ? "bg-red-100 text-red-800 border-red-300"
+                          : "bg-amber-100 text-amber-800 border-amber-300"
                       }`}
                     >
-                      {report.status}
+                      {report.status === "COMPLETED" || report.status === "VERIFIED" || report.status === "APPROVED"
+                        ? "🟢 COMPLETED"
+                        : report.status === "UNDER_REVIEW"
+                        ? "🔵 UNDER REVIEW BY OFFICER"
+                        : report.status === "ASSIGNED" || report.status === "COLLECTING" || report.status === "COLLECTED"
+                        ? "🚚 DISPATCHED / IN PROGRESS"
+                        : report.status === "REJECTED"
+                        ? "🔴 REJECTED"
+                        : "🟡 REPORTED (PENDING REVIEW)"}
+
                     </span>
                   </div>
 
-                  {(report.status === "COLLECTED" || report.status === "VERIFIED") && (
+                  {(report.status === "COLLECTED" || report.status === "VERIFIED" || report.status === "COMPLETED") && (
+
                     <div className="mt-3 pt-3 border-t border-slate-100">
                       {resolutionFeedback[report.id] ? (
                         <div className={`p-2.5 rounded-lg text-xs font-bold text-center ${

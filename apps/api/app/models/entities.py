@@ -63,12 +63,16 @@ class PriorityLevel(str, enum.Enum):
 
 class IncidentStatus(str, enum.Enum):
     REPORTED = "REPORTED"
+    UNDER_REVIEW = "UNDER_REVIEW"
     ASSIGNED = "ASSIGNED"
     IN_PROGRESS = "IN_PROGRESS"
     COLLECTED = "COLLECTED"
     VERIFIED = "VERIFIED"
+    COMPLETED = "COMPLETED"
+    REJECTED = "REJECTED"
     CLOSED = "CLOSED"
     REOPENED = "REOPENED"
+
 
 
 class WasteCategory(str, enum.Enum):

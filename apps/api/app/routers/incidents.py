@@ -4,14 +4,16 @@ Implements duplicate report clustering, dynamic priority engine integration, and
 """
 
 import math
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, or_, cast, String
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+
 
 from app.core.db import get_db
 from app.core.security import (
@@ -42,7 +44,9 @@ from app.schemas.all_schemas import (
     OfficerVerifyProofRequest,
     ReportCreate,
     ReportRead,
+    ReportUpdate,
 )
+
 from app.services.clustering_service import DuplicateClusteringService
 from app.services.priority_engine import DynamicPriorityEngine
 from app.ws.live_ws import ws_manager
@@ -163,6 +167,26 @@ async def create_report(
     return ReportRead(**report_dict)
 
 
+def _get_effective_report_status(report: Report) -> IncidentStatus:
+    status_val = report.status
+    if status_val in (IncidentStatus.VERIFIED, IncidentStatus.COMPLETED, IncidentStatus.CLOSED):
+        return IncidentStatus.COMPLETED
+    if status_val == IncidentStatus.REJECTED:
+        return IncidentStatus.REJECTED
+
+    if report.incident:
+        inc_status = report.incident.status
+        if inc_status in (IncidentStatus.VERIFIED, IncidentStatus.COMPLETED, IncidentStatus.CLOSED):
+            return IncidentStatus.COMPLETED
+        elif inc_status == IncidentStatus.REJECTED:
+            return IncidentStatus.REJECTED
+        elif inc_status == IncidentStatus.ASSIGNED and status_val == IncidentStatus.REPORTED:
+            return IncidentStatus.ASSIGNED
+        elif inc_status == IncidentStatus.UNDER_REVIEW and status_val == IncidentStatus.REPORTED:
+            return IncidentStatus.UNDER_REVIEW
+    return status_val
+
+
 @reports_router.get("", response_model=List[ReportRead])
 async def list_reports(
     incident_id: Optional[uuid.UUID] = None,
@@ -193,12 +217,10 @@ async def list_reports(
     res = await db.execute(stmt)
     reports = res.scalars().all()
 
-    # Attach incident priority to response
     result_list = []
     for r in reports:
-        prio = None
-        if r.incident:
-            prio = r.incident.priority
+        prio = r.incident.priority if r.incident else None
+        eff_status = _get_effective_report_status(r)
         r_dict = {
             "id": r.id,
             "user_id": r.user_id,
@@ -214,7 +236,7 @@ async def list_reports(
             "latitude": r.latitude,
             "longitude": r.longitude,
             "address_text": r.address_text,
-            "status": r.status,
+            "status": eff_status,
             "priority": prio,
             "created_at": r.created_at,
         }
@@ -238,9 +260,8 @@ async def list_my_reports(
     reports = res.scalars().all()
     result_list = []
     for r in reports:
-        prio = None
-        if r.incident:
-            prio = r.incident.priority
+        prio = r.incident.priority if r.incident else None
+        eff_status = _get_effective_report_status(r)
         r_dict = {
             "id": r.id,
             "user_id": r.user_id,
@@ -256,7 +277,7 @@ async def list_my_reports(
             "latitude": r.latitude,
             "longitude": r.longitude,
             "address_text": r.address_text,
-            "status": r.status,
+            "status": eff_status,
             "priority": prio,
             "created_at": r.created_at,
         }
@@ -264,24 +285,52 @@ async def list_my_reports(
     return result_list
 
 
+async def _resolve_report_by_id_string(db: AsyncSession, raw_id: str) -> Optional[Report]:
+    clean_id = raw_id.strip()
+    for prefix in ("REP-", "WW-", "INC-", "WM-"):
+        if clean_id.upper().startswith(prefix):
+            clean_id = clean_id[len(prefix):]
+    # Remove priority suffix if appended (e.g. B96C4EDDP2 or B96C4EDD-P2)
+    clean_id = re.sub(r'[-_]?P[0-4]$', '', clean_id, flags=re.IGNORECASE)
+
+    # 1. Exact UUID match
+    try:
+        target_uuid = uuid.UUID(clean_id)
+        stmt = select(Report).options(selectinload(Report.incident)).where(Report.id == target_uuid)
+        res = await db.execute(stmt)
+        rep = res.scalar_one_or_none()
+        if rep:
+            return rep
+    except (ValueError, TypeError):
+        pass
+
+    # 2. Prefix or incident_id match
+    clean_prefix = clean_id.lower()
+    stmt = (
+        select(Report)
+        .options(selectinload(Report.incident))
+        .where(
+            or_(
+                cast(Report.id, String).ilike(f"{clean_prefix}%"),
+                cast(Report.incident_id, String).ilike(f"{clean_prefix}%"),
+            )
+        )
+        .order_by(Report.created_at.desc())
+    )
+    res = await db.execute(stmt)
+    return res.scalars().first()
+
+
 @reports_router.get("/{report_id}", response_model=ReportRead)
 async def get_report_by_id(
-    report_id: uuid.UUID,
+    report_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
 ):
     """
-    Get report details by report ID.
-    - Officers and Admins can view any municipal report.
-    - Citizens can view ONLY their own report (returns 404 for other citizens' reports).
+    Get report details by report ID (supports full UUID, short code prefix, or REP- prefix).
     """
-    stmt = (
-        select(Report)
-        .options(selectinload(Report.incident))
-        .where(Report.id == report_id)
-    )
-    res = await db.execute(stmt)
-    report = res.scalar_one_or_none()
+    report = await _resolve_report_by_id_string(db, report_id)
     if not report:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -303,6 +352,7 @@ async def get_report_by_id(
             )
 
     prio = report.incident.priority if report.incident else None
+    eff_status = _get_effective_report_status(report)
     r_dict = {
         "id": report.id,
         "user_id": report.user_id,
@@ -318,14 +368,99 @@ async def get_report_by_id(
         "latitude": report.latitude,
         "longitude": report.longitude,
         "address_text": report.address_text,
-        "status": report.status,
+        "status": eff_status,
         "priority": prio,
         "created_at": report.created_at,
     }
     return ReportRead(**r_dict)
 
 
+@reports_router.patch("/{report_id}", response_model=ReportRead)
+async def update_report_status(
+    report_id: str,
+    payload: ReportUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(require_role(UserRole.OFFICER, UserRole.ADMIN, UserRole.DRIVER)),
+):
+    """
+    Officer updates citizen report status (REPORTED -> UNDER_REVIEW -> COMPLETED / REJECTED / ASSIGNED).
+    Persists to PostgreSQL reports and incidents tables and broadcasts realtime update via WebSockets.
+    """
+    report = await _resolve_report_by_id_string(db, report_id)
+    if not report:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Report with ID '{report_id}' not found",
+        )
+
+    if payload.status is not None:
+        raw_st = str(payload.status).upper()
+        if raw_st in ("COMPLETED", "APPROVED", "VERIFIED") or payload.status in (IncidentStatus.COMPLETED, IncidentStatus.VERIFIED):
+            target_st = IncidentStatus.COMPLETED
+        elif raw_st in ("REJECTED", "DUPLICATE") or payload.status == IncidentStatus.REJECTED:
+            target_st = IncidentStatus.REJECTED
+        elif raw_st in ("UNDER_REVIEW", "ESCALATED") or payload.status == IncidentStatus.UNDER_REVIEW:
+            target_st = IncidentStatus.UNDER_REVIEW
+        else:
+            target_st = payload.status
+
+        report.status = target_st
+        # Sync parent incident status if linked
+        if report.incident:
+            if target_st in (IncidentStatus.COMPLETED, IncidentStatus.VERIFIED, IncidentStatus.CLOSED):
+                report.incident.status = IncidentStatus.VERIFIED
+            elif target_st == IncidentStatus.REJECTED:
+                report.incident.status = IncidentStatus.REJECTED
+            elif target_st == IncidentStatus.ASSIGNED:
+                report.incident.status = IncidentStatus.ASSIGNED
+
+
+    if payload.officer_notes:
+        report.recommended_action = f"Officer Note: {payload.officer_notes}"
+
+    await db.commit()
+    await db.refresh(report)
+
+    # Broadcast WebSocket status sync event
+    status_event = {
+        "report_id": str(report.id),
+        "incident_id": str(report.incident_id) if report.incident_id else None,
+        "status": report.status.value if hasattr(report.status, "value") else str(report.status),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        await ws_manager.broadcast_event("REPORT_STATUS_UPDATED", status_event)
+        await ws_manager.broadcast_event("INCIDENT_STATUS_UPDATED", status_event)
+    except Exception:
+        pass
+
+    prio = report.incident.priority if report.incident else None
+    eff_status = _get_effective_report_status(report)
+    r_dict = {
+        "id": report.id,
+        "user_id": report.user_id,
+        "incident_id": report.incident_id,
+        "category": report.category,
+        "confidence": report.confidence,
+        "estimated_volume_m3": report.estimated_volume_m3,
+        "severity_score": report.severity_score,
+        "detected_tags": report.detected_tags,
+        "recommended_action": report.recommended_action,
+        "description": report.description,
+        "image_urls": report.image_urls,
+        "latitude": report.latitude,
+        "longitude": report.longitude,
+        "address_text": report.address_text,
+        "status": eff_status,
+        "priority": prio,
+        "created_at": report.created_at,
+    }
+    return ReportRead(**r_dict)
+
+
+
 # ---------------------------------------------------------------------------
+
 # Incidents Router
 # ---------------------------------------------------------------------------
 incidents_router = APIRouter()
@@ -417,7 +552,7 @@ async def update_incident(
     ),
 ):
     """Officer updates incident priority, assignment, or status with PostgreSQL persistence."""
-    stmt = select(Incident).where(Incident.id == incident_id)
+    stmt = select(Incident).options(selectinload(Incident.reports)).where(Incident.id == incident_id)
     res = await db.execute(stmt)
     inc = res.scalar_one_or_none()
 
@@ -492,9 +627,38 @@ async def update_incident(
     if payload.recommended_action is not None:
         inc.recommended_action = payload.recommended_action
 
+    # Synchronize attached reports in PostgreSQL database
+    if inc.reports and payload.status is not None:
+        for rep in inc.reports:
+            # Preserve already completed, verified, or rejected report statuses
+            if rep.status in (IncidentStatus.COMPLETED, IncidentStatus.VERIFIED, IncidentStatus.REJECTED):
+                continue
+            if payload.status in (IncidentStatus.COMPLETED, IncidentStatus.VERIFIED, IncidentStatus.CLOSED):
+                rep.status = IncidentStatus.COMPLETED
+            elif payload.status == IncidentStatus.REJECTED:
+                rep.status = IncidentStatus.REJECTED
+            elif payload.status == IncidentStatus.UNDER_REVIEW:
+                rep.status = IncidentStatus.UNDER_REVIEW
+            elif payload.status == IncidentStatus.ASSIGNED:
+                rep.status = IncidentStatus.ASSIGNED
+
     inc.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(inc)
+
+    # Broadcast WebSocket update
+    try:
+        await ws_manager.broadcast_event(
+            "REPORT_STATUS_UPDATED",
+            {
+                "incident_id": str(inc.id),
+                "status": inc.status.value if hasattr(inc.status, "value") else str(inc.status),
+                "updated_at": inc.updated_at.isoformat(),
+            },
+        )
+    except Exception:
+        pass
+
 
     # Broadcast events
     try:
@@ -792,7 +956,11 @@ async def verify_incident_proof(
     """
     stmt = (
         select(Incident)
-        .options(selectinload(Incident.proofs), selectinload(Incident.assigned_driver))
+        .options(
+            selectinload(Incident.proofs),
+            selectinload(Incident.assigned_driver),
+            selectinload(Incident.reports),
+        )
         .where(Incident.id == incident_id)
     )
     res = await db.execute(stmt)
@@ -817,25 +985,34 @@ async def verify_incident_proof(
     if payload.notes:
         latest_proof.notes = payload.notes
 
-    # Transition incident status to VERIFIED
+    # Transition incident status to VERIFIED and attached child reports to COMPLETED
     inc.status = IncidentStatus.VERIFIED
+    if inc.reports:
+        for rep in inc.reports:
+            rep.status = IncidentStatus.COMPLETED
+
     inc.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(inc)
 
     # Broadcast real-time verification event
     try:
+        status_event = {
+            "incident_id": str(inc.id),
+            "incident_code": f"WW-{str(inc.id)[:8].upper()}",
+            "status": "COMPLETED",
+            "proof_status": "VERIFIED",
+            "verified_at": inc.updated_at.isoformat(),
+            "verified_by": current_user.sub,
+            "notes": payload.notes,
+        }
         await ws_manager.broadcast_event(
             event_type="INCIDENT_VERIFIED",
-            data={
-                "incident_id": str(inc.id),
-                "incident_code": f"WW-{str(inc.id)[:8].upper()}",
-                "status": "VERIFIED",
-                "proof_status": "VERIFIED",
-                "verified_at": inc.updated_at.isoformat(),
-                "verified_by": current_user.sub,
-                "notes": payload.notes,
-            },
+            data=status_event,
+        )
+        await ws_manager.broadcast_event(
+            event_type="REPORT_STATUS_UPDATED",
+            data=status_event,
         )
     except Exception:
         pass
@@ -865,7 +1042,11 @@ async def reject_incident_proof(
     """
     stmt = (
         select(Incident)
-        .options(selectinload(Incident.proofs), selectinload(Incident.assigned_driver))
+        .options(
+            selectinload(Incident.proofs),
+            selectinload(Incident.assigned_driver),
+            selectinload(Incident.reports),
+        )
         .where(Incident.id == incident_id)
     )
     res = await db.execute(stmt)
@@ -891,27 +1072,33 @@ async def reject_incident_proof(
         rejection_note += f" — {payload.notes}"
     latest_proof.notes = rejection_note
 
-    # Reset status to IN_PROGRESS for driver retake
+    # Reset incident to IN_PROGRESS and attached reports to UNDER_REVIEW
     inc.status = IncidentStatus.IN_PROGRESS
+    if inc.reports:
+        for rep in inc.reports:
+            rep.status = IncidentStatus.UNDER_REVIEW
+
     inc.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(inc)
 
     # Broadcast rejection event to Driver Cockpit & Officer CommandCenter
     try:
+        status_event = {
+            "incident_id": str(inc.id),
+            "incident_code": f"WW-{str(inc.id)[:8].upper()}",
+            "status": "UNDER_REVIEW",
+            "proof_status": "REJECTED",
+            "rejection_reason": payload.reason,
+            "notes": payload.notes,
+        }
         await ws_manager.broadcast_event(
             event_type="INCIDENT_PROOF_REJECTED",
-            data={
-                "incident_id": str(inc.id),
-                "incident_code": f"WW-{str(inc.id)[:8].upper()}",
-                "status": "IN_PROGRESS",
-                "proof_status": "REJECTED",
-                "rejection_reason": payload.reason,
-                "notes": payload.notes,
-                "driver_id": (
-                    str(inc.assigned_driver_id) if inc.assigned_driver_id else None
-                ),
-            },
+            data=status_event,
+        )
+        await ws_manager.broadcast_event(
+            event_type="REPORT_STATUS_UPDATED",
+            data=status_event,
         )
     except Exception:
         pass
