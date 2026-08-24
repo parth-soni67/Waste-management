@@ -25,14 +25,14 @@ def get_vision_provider() -> Optional[VisionProvider]:
         return None
 
     provider_type = (settings.LLM_PROVIDER or "gemini").strip().lower()
-    model = (settings.LLM_MODEL or "gemini-2.5-flash").strip()
+    model = (settings.LLM_MODEL or "gemini-3.6-flash").strip()
 
     if provider_type in ("gemini", "google", "default"):
         logger.info(f"AI_PROVIDER_SELECTED provider=gemini model={model}")
         return GeminiVisionProvider(
             api_key=api_key,
             model=model,
-            timeout_seconds=getattr(settings, "AI_TIMEOUT_SECONDS", 15.0),
+            timeout_seconds=getattr(settings, "AI_TIMEOUT_SECONDS", 30.0),
         )
 
     logger.warning(

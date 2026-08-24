@@ -67,11 +67,11 @@ class GeminiVisionProvider(VisionProvider):
     def __init__(
         self,
         api_key: str,
-        model: str = "gemini-2.5-flash",
-        timeout_seconds: float = 15.0,
+        model: str = "gemini-3.6-flash",
+        timeout_seconds: float = 30.0,
     ):
         self.api_key = api_key
-        self.model = model or "gemini-2.5-flash"
+        self.model = model or "gemini-3.6-flash"
         self.timeout_seconds = timeout_seconds
 
     async def analyze_image(
