@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
+import { formatRelativeTime } from "@/app/lib/timeAgo";
 
 interface CitizenReport {
   id: string;
@@ -94,21 +95,14 @@ export default function CitizenPage() {
   // Real citizen reports list (isolated per authenticated user from backend)
   const [reportsList, setReportsList] = useState<CitizenReport[]>([]);
 
-  const formatRelativeTime = (dateString?: string): string => {
-    if (!dateString) return "Just now";
-    const date = new Date(dateString);
-    const now = Date.now();
-    const elapsedMs = Math.max(0, now - date.getTime());
-    const elapsedSecs = Math.floor(elapsedMs / 1000);
-    const elapsedMins = Math.floor(elapsedSecs / 60);
-    const elapsedHours = Math.floor(elapsedMins / 60);
-    const elapsedDays = Math.floor(elapsedHours / 24);
-
-    if (elapsedSecs < 45) return "Just now";
-    if (elapsedMins < 60) return `${elapsedMins}m ago`;
-    if (elapsedHours < 24) return `${elapsedHours}h ago`;
-    return `${elapsedDays}d ago`;
-  };
+  // Periodic 15-second tick to update relative timestamps in real time
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const tickInterval = setInterval(() => {
+      setTick((prev) => prev + 1);
+    }, 15000);
+    return () => clearInterval(tickInterval);
+  }, []);
 
   // --- Live Camera & File Upload Logic ---
   const [isCameraActive, setIsCameraActive] = useState(false);

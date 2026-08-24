@@ -4,6 +4,7 @@ Implements duplicate report clustering, dynamic priority engine integration, and
 """
 
 import uuid
+from datetime import timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -117,7 +118,11 @@ async def create_report(
                 "latitude": incident.latitude,
                 "longitude": incident.longitude,
                 "address_text": incident.address_text,
-                "created_at": incident.created_at.isoformat(),
+                "created_at": (
+                    incident.created_at.replace(tzinfo=timezone.utc).isoformat()
+                    if incident.created_at.tzinfo is None
+                    else incident.created_at.astimezone(timezone.utc).isoformat()
+                ),
             },
         )
     except Exception:

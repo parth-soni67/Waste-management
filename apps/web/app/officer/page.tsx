@@ -49,6 +49,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
+import { formatRelativeTime, getElapsedMinutes, parseUtcDate } from "@/app/lib/timeAgo";
 import type { MapPoint } from "@/components/map/MapLibreView";
 
 // Dynamically import MapLibre for SSR safety
@@ -71,6 +72,7 @@ interface IncidentItem {
   lng: number;
   reportsCount: number;
   timeAgo: string;
+  createdAt: string;
   slaMinutesLeft: number;
   assignedTruck?: string;
   sensitiveLocation?: string;
@@ -346,9 +348,9 @@ export default function OfficerPage() {
         if (Array.isArray(data) && data.length > 0) {
           const mappedIncidents: IncidentItem[] = data.map((inc: BackendIncidentItem) => {
             const isP0 = inc.priority === "P0";
-            const createdDate = inc.created_at ? new Date(inc.created_at) : new Date();
-            const elapsedMins = Math.max(0, Math.round((Date.now() - createdDate.getTime()) / 60000));
-            const timeAgoStr = elapsedMins === 0 ? "Just now" : elapsedMins < 60 ? `${elapsedMins}m ago` : `${Math.floor(elapsedMins / 60)}h ago`;
+            const createdAtStr = inc.created_at || new Date().toISOString();
+            const elapsedMins = getElapsedMinutes(createdAtStr);
+            const timeAgoStr = formatRelativeTime(createdAtStr);
             const slaLeft = isP0 ? Math.max(10, 45 - elapsedMins) : inc.priority === "P1" ? Math.max(20, 120 - elapsedMins) : Math.max(60, 240 - elapsedMins);
 
             return {
@@ -361,6 +363,7 @@ export default function OfficerPage() {
               lng: Number(inc.longitude),
               reportsCount: inc.report_count || 1,
               timeAgo: timeAgoStr,
+              createdAt: createdAtStr,
               slaMinutesLeft: slaLeft,
               sensitiveLocation: isP0 ? "Hospital Buffer Zone (<200m)" : inc.address_text || undefined,
               assignedTruck: inc.assigned_vehicle_id ? "GJ-01-WM-4402 (Assigned)" : undefined,
@@ -467,15 +470,14 @@ export default function OfficerPage() {
     };
   }, [fetchBackendData]);
 
-  const getMinutes = (timeStr: string) => {
-    if (timeStr === "Just now") return 0;
-    let mins = 0;
-    const h = timeStr.match(/(\d+)\s*h/);
-    const m = timeStr.match(/(\d+)\s*m/);
-    if (h) mins += parseInt(h[1]) * 60;
-    if (m) mins += parseInt(m[1]);
-    return mins;
-  };
+  // Periodic 15-second tick to re-render relative time tags ("Just now" -> "1 min ago") without polling DB
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const tickInterval = setInterval(() => {
+      setTick((prev) => prev + 1);
+    }, 15000);
+    return () => clearInterval(tickInterval);
+  }, []);
 
   const filteredIncidents = incidents
     .filter((i) => filterPriority === "ALL" || i.priority === filterPriority)
@@ -488,9 +490,9 @@ export default function OfficerPage() {
       return true;
     })
     .sort((a, b) => {
-      const minsA = getMinutes(a.timeAgo);
-      const minsB = getMinutes(b.timeAgo);
-      return filterTime === "LATEST" ? minsA - minsB : minsB - minsA;
+      const timeA = parseUtcDate(a.createdAt).getTime();
+      const timeB = parseUtcDate(b.createdAt).getTime();
+      return filterTime === "LATEST" ? timeB - timeA : timeA - timeB;
     });
 
   const handleDispatch = async (id: string) => {
@@ -606,6 +608,7 @@ export default function OfficerPage() {
         lng: 72.586,
         reportsCount: 6,
         timeAgo: "Just now",
+        createdAt: new Date().toISOString(),
         slaMinutesLeft: 30,
         sensitiveLocation: "Hospital Red Zone",
         assignedTruck: "GJ-01-WM-4402 (PREEMPTED STOP 1)",
@@ -1198,7 +1201,7 @@ export default function OfficerPage() {
                       </span>
                       <span className="font-mono text-xs font-bold text-slate-800">{inc.id}</span>
                     </div>
-                    <span className="text-[11px] font-semibold text-slate-400">{inc.timeAgo}</span>
+                    <span className="text-[11px] font-semibold text-slate-400">{formatRelativeTime(inc.createdAt)}</span>
                   </div>
 
                   <h3 className="text-xs font-bold text-slate-900 line-clamp-1 mb-1">{inc.title}</h3>
@@ -1556,39 +1559,44 @@ export default function OfficerPage() {
               <Bell className="w-4 h-4 text-[var(--color-accent)]" />
               <h2 className="text-sm font-bold">Smart Alerts</h2>
             </div>
-            <span className="text-[10px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">4 Active</span>
+            <span className="text-[10px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+              {incidents.filter((i) => i.priority === "P0" || i.priority === "P1").length || 1} Active
+            </span>
           </div>
 
           <div className="space-y-2.5 max-h-[320px] overflow-y-auto">
-            {[
-              {
-                type: "critical",
-                title: "P0 Emergency: Bio-hazard near Hospital",
-                message: "Hazardous waste within 200m of Civil Hospital pediatric wing.",
-                action: "View & Dispatch",
-                time: "2m ago",
-              },
-              {
-                type: "warning",
-                title: "SLA Breach: INC-8091 exceeds 2h target",
-                message: "Hazardous mixed waste at Sector 12 Civil Hospital Red Zone has exceeded P0 SLA. Currently at 2h 24m.",
-                action: "Escalate Priority",
-                time: "14m ago",
-              },
-              {
-                type: "ai",
-                title: "AI: Sector 21 approaching critical",
-                message: "89% accumulation probability by 09:30 AM. Recommend pre-dispatch by 06:00 AM.",
-                action: "Schedule Pre-dispatch",
-                time: "28m ago",
-              },
-              {
-                type: "info",
-                title: "Route optimization saved 14.2 km",
-                message: "Dynamic re-routing saved 2.56L fuel and 6.86 kg CO₂ today.",
-                time: "1h ago",
-              },
-            ].map((alert, i) => (
+            {(() => {
+              const alerts = [];
+              const p0s = incidents.filter((i) => i.priority === "P0");
+              for (const p0 of p0s) {
+                alerts.push({
+                  type: "critical",
+                  title: `P0 Emergency: ${p0.title}`,
+                  message: `${p0.category} waste in sensitive zone (${p0.sensitiveLocation || "Hospital buffer zone"}).`,
+                  action: "View & Dispatch",
+                  time: formatRelativeTime(p0.createdAt),
+                });
+              }
+              const p1s = incidents.filter((i) => i.priority === "P1");
+              for (const p1 of p1s) {
+                alerts.push({
+                  type: "warning",
+                  title: `High Priority: ${p1.title}`,
+                  message: `Accumulation severity: ${p1.slaMinutesLeft}m SLA remaining. Immediate truck dispatch recommended.`,
+                  action: "Assign Truck",
+                  time: formatRelativeTime(p1.createdAt),
+                });
+              }
+              if (alerts.length === 0) {
+                alerts.push({
+                  type: "info",
+                  title: "All Municipal Sectors Monitored",
+                  message: "Real-time AI surveillance active across Gandhinagar sectors. No critical SLA breaches detected.",
+                  time: "Just now",
+                });
+              }
+              return alerts;
+            })().map((alert, i) => (
               <div
                 key={i}
                 className={`p-3 rounded-xl border text-xs ${

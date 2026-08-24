@@ -6,10 +6,10 @@ Implements system_guide.md §3: dedicated schemas per direction (Create, Read, U
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_serializer
 
 from app.models.entities import (
     IncidentStatus,
@@ -18,6 +18,17 @@ from app.models.entities import (
     VehicleStatus,
     WasteCategory,
 )
+
+
+def _serialize_utc_iso(dt: Optional[datetime]) -> Optional[str]:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    return dt.isoformat()
+
 
 # ---------------------------------------------------------------------------
 # Auth & User Schemas
@@ -59,6 +70,10 @@ class UserRead(BaseModel):
     is_verified: bool
     mfa_enabled: bool
     created_at: datetime
+
+    @field_serializer("created_at")
+    def serialize_created_at(self, dt: datetime) -> str:
+        return _serialize_utc_iso(dt) or ""
 
 
 class PasswordResetRequest(BaseModel):
@@ -107,6 +122,10 @@ class VehicleRead(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    @field_serializer("created_at", "updated_at", check_fields=False)
+    def serialize_vehicle_dt(self, dt: datetime) -> str:
+        return _serialize_utc_iso(dt) or ""
+
 
 # ---------------------------------------------------------------------------
 # Report Schemas
@@ -148,6 +167,10 @@ class ReportRead(BaseModel):
     status: IncidentStatus
     priority: Optional[PriorityLevel] = None
     created_at: datetime
+
+    @field_serializer("created_at")
+    def serialize_report_dt(self, dt: datetime) -> str:
+        return _serialize_utc_iso(dt) or ""
 
 
 # ---------------------------------------------------------------------------
@@ -208,6 +231,10 @@ class IncidentRead(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    @field_serializer("created_at", "updated_at", check_fields=False)
+    def serialize_incident_dt(self, dt: datetime) -> str:
+        return _serialize_utc_iso(dt) or ""
+
 
 # ---------------------------------------------------------------------------
 # Notification Schemas
@@ -224,6 +251,10 @@ class NotificationRead(BaseModel):
     notification_type: str
     is_read: bool
     created_at: datetime
+
+    @field_serializer("created_at")
+    def serialize_notification_dt(self, dt: datetime) -> str:
+        return _serialize_utc_iso(dt) or ""
 
 
 class WasteAnalysisResult(BaseModel):

@@ -302,3 +302,69 @@ async def test_officer_update_incident_unauthorized():
             json={"status": "CLOSED"},
         )
         assert patch_res.status_code in (401, 403)
+
+
+@pytest.mark.asyncio
+async def test_report_and_incident_timestamps_authoritative_and_timezone_aware(
+    officer_token,
+):
+    """
+    Verify report and incident creation timestamps are generated server-side,
+    timezone-aware UTC, and match between report creation and subsequent GETs.
+    """
+    from datetime import datetime, timezone
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # 1. Create a report (client cannot dictate created_at)
+        start_time = datetime.now(timezone.utc)
+        res = await client.post(
+            "/api/v1/reports",
+            json={
+                "category": "organic",
+                "severity_score": 7.0,
+                "latitude": 23.045,
+                "longitude": 72.540,
+                "description": "Vegetable waste pile near market",
+                "created_at": "1990-01-01T00:00:00Z",  # Bogus client timestamp
+            },
+            headers={"Authorization": f"Bearer {officer_token}"},
+        )
+        assert res.status_code == 201
+        data = res.json()
+        report_id = data["id"]
+        incident_id = data["incident_id"]
+        created_at_str = data["created_at"]
+
+        # Verify timestamp contains timezone info (Z or +00:00)
+        assert (
+            "Z" in created_at_str
+            or "+00:00" in created_at_str
+            or "+00" in created_at_str
+        )
+
+        # Parse and verify within 10s of now (bogus 1990 timestamp was ignored)
+        parsed_dt = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
+        assert (datetime.now(timezone.utc) - parsed_dt).total_seconds() < 10.0
+        assert (
+            parsed_dt >= start_time
+            or abs((start_time - parsed_dt).total_seconds()) < 2.0
+        )
+
+        # 2. Verify GET /api/v1/reports returns exact same timestamp
+        get_rep = await client.get(
+            "/api/v1/reports", headers={"Authorization": f"Bearer {officer_token}"}
+        )
+        assert get_rep.status_code == 200
+        reports = get_rep.json()
+        matched_rep = next(r for r in reports if r["id"] == report_id)
+        assert matched_rep["created_at"] == created_at_str
+
+        # 3. Verify GET /api/v1/incidents returns timezone-aware created_at and updated_at
+        get_inc = await client.get(f"/api/v1/incidents/{incident_id}")
+        assert get_inc.status_code == 200
+        inc_data = get_inc.json()
+        assert "created_at" in inc_data
+        assert "updated_at" in inc_data
+        inc_created = inc_data["created_at"]
+        assert "Z" in inc_created or "+00:00" in inc_created or "+00" in inc_created
