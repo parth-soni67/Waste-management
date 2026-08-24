@@ -119,12 +119,28 @@ class VehicleRead(BaseModel):
     current_lat: Optional[float] = None
     current_lng: Optional[float] = None
     driver_id: Optional[uuid.UUID] = None
+    driver_name: Optional[str] = None
+    driver_email: Optional[str] = None
+    driver_phone: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
     @field_serializer("created_at", "updated_at", check_fields=False)
     def serialize_vehicle_dt(self, dt: datetime) -> str:
         return _serialize_utc_iso(dt) or ""
+
+
+class AvailableDriverVehicleRead(BaseModel):
+    vehicle_id: uuid.UUID
+    plate_number: str
+    vehicle_type: str
+    capacity_kg: float
+    current_load_kg: float
+    status: VehicleStatus
+    driver_id: Optional[uuid.UUID] = None
+    driver_name: Optional[str] = None
+    driver_email: Optional[str] = None
+    driver_phone: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -202,6 +218,9 @@ class IncidentUpdate(BaseModel):
     priority: Optional[PriorityLevel] = None
     status: Optional[IncidentStatus] = None
     assigned_vehicle_id: Optional[uuid.UUID] = None
+    assigned_driver_id: Optional[uuid.UUID] = None
+    assigned_at: Optional[datetime] = None
+    assigned_by_id: Optional[uuid.UUID] = None
     estimated_volume_m3: Optional[float] = None
     severity_score: Optional[float] = None
     recommended_action: Optional[str] = None
@@ -228,12 +247,15 @@ class IncidentRead(BaseModel):
     image_urls: List[str] = Field(default_factory=list)
     report_count: int
     assigned_vehicle_id: Optional[uuid.UUID] = None
+    assigned_driver_id: Optional[uuid.UUID] = None
+    assigned_at: Optional[datetime] = None
+    assigned_by_id: Optional[uuid.UUID] = None
     created_at: datetime
     updated_at: datetime
 
-    @field_serializer("created_at", "updated_at", check_fields=False)
-    def serialize_incident_dt(self, dt: datetime) -> str:
-        return _serialize_utc_iso(dt) or ""
+    @field_serializer("created_at", "updated_at", "assigned_at", check_fields=False)
+    def serialize_incident_dt(self, dt: Optional[datetime]) -> Optional[str]:
+        return _serialize_utc_iso(dt)
 
 
 # ---------------------------------------------------------------------------

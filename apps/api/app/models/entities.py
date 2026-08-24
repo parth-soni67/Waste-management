@@ -256,6 +256,19 @@ class Incident(Base):
         ForeignKey("vehicles.id", ondelete="SET NULL"),
         nullable=True,
     )
+    assigned_driver_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    assigned_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    assigned_by_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     started_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -283,6 +296,12 @@ class Incident(Base):
 
     assigned_vehicle: Mapped[Optional["Vehicle"]] = relationship(
         "Vehicle", back_populates="incidents"
+    )
+    assigned_driver: Mapped[Optional["User"]] = relationship(
+        "User", foreign_keys=[assigned_driver_id]
+    )
+    assigned_by: Mapped[Optional["User"]] = relationship(
+        "User", foreign_keys=[assigned_by_id]
     )
     completed_by: Mapped[Optional["User"]] = relationship(
         "User", foreign_keys=[completed_by_id]

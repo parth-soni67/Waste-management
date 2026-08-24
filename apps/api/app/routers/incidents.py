@@ -4,7 +4,7 @@ Implements duplicate report clustering, dynamic priority engine integration, and
 """
 
 import uuid
-from datetime import timezone
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -24,6 +24,10 @@ from app.models.entities import (
     IncidentStatus,
     PriorityLevel,
     Report,
+    User,
+    UserRole,
+    Vehicle,
+    VehicleStatus,
 )
 from app.schemas.all_schemas import (
     IncidentRead,
@@ -400,7 +404,9 @@ async def update_incident(
     incident_id: uuid.UUID,
     payload: IncidentUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: TokenPayload = Depends(require_role("officer", "admin", "driver")),
+    current_user: TokenPayload = Depends(
+        require_role(UserRole.OFFICER, UserRole.ADMIN, UserRole.DRIVER)
+    ),
 ):
     """Officer updates incident priority, assignment, or status with PostgreSQL persistence."""
     stmt = select(Incident).where(Incident.id == incident_id)
@@ -412,6 +418,57 @@ async def update_incident(
             status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found"
         )
 
+    assigned_vehicle = None
+    if payload.assigned_vehicle_id is not None:
+        veh_stmt = (
+            select(Vehicle)
+            .where(Vehicle.id == payload.assigned_vehicle_id)
+            .options(selectinload(Vehicle.driver))
+        )
+        veh_res = await db.execute(veh_stmt)
+        assigned_vehicle = veh_res.scalar_one_or_none()
+        if not assigned_vehicle:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Assigned vehicle not found",
+            )
+        inc.assigned_vehicle_id = assigned_vehicle.id
+        assigned_vehicle.status = VehicleStatus.ASSIGNED
+
+        # Auto-resolve driver from vehicle if not explicitly supplied
+        if payload.assigned_driver_id is None and assigned_vehicle.driver_id:
+            inc.assigned_driver_id = assigned_vehicle.driver_id
+
+    if payload.assigned_driver_id is not None:
+        driver_stmt = select(User).where(
+            User.id == payload.assigned_driver_id, User.role == UserRole.DRIVER
+        )
+        driver_res = await db.execute(driver_stmt)
+        driver = driver_res.scalar_one_or_none()
+        if not driver:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Assigned driver account not found",
+            )
+        inc.assigned_driver_id = driver.id
+        if assigned_vehicle and not assigned_vehicle.driver_id:
+            assigned_vehicle.driver_id = driver.id
+
+    # If assigning vehicle/driver, record metadata
+    if (
+        payload.assigned_vehicle_id is not None
+        or payload.assigned_driver_id is not None
+        or payload.status == IncidentStatus.ASSIGNED
+    ):
+        inc.assigned_at = datetime.now(timezone.utc)
+        if current_user and current_user.sub:
+            try:
+                inc.assigned_by_id = uuid.UUID(current_user.sub)
+            except Exception:
+                pass
+        if inc.status == IncidentStatus.REPORTED:
+            inc.status = IncidentStatus.ASSIGNED
+
     if payload.title is not None:
         inc.title = payload.title
     if payload.description is not None:
@@ -420,8 +477,6 @@ async def update_incident(
         inc.priority = payload.priority
     if payload.status is not None:
         inc.status = payload.status
-    if payload.assigned_vehicle_id is not None:
-        inc.assigned_vehicle_id = payload.assigned_vehicle_id
     if payload.estimated_volume_m3 is not None:
         inc.estimated_volume_m3 = payload.estimated_volume_m3
     if payload.severity_score is not None:
@@ -429,11 +484,43 @@ async def update_incident(
     if payload.recommended_action is not None:
         inc.recommended_action = payload.recommended_action
 
+    inc.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(inc)
 
-    # Broadcast status change to connected surfaces
+    # Broadcast events
     try:
+        if inc.status in [IncidentStatus.ASSIGNED, IncidentStatus.IN_PROGRESS]:
+            await ws_manager.broadcast_event(
+                event_type="INCIDENT_ASSIGNED",
+                data={
+                    "incident_id": str(inc.id),
+                    "incident_code": f"WW-{str(inc.id)[:8].upper()}",
+                    "title": inc.title,
+                    "priority": inc.priority.value,
+                    "category": inc.category.value,
+                    "latitude": inc.latitude,
+                    "longitude": inc.longitude,
+                    "address": inc.address_text,
+                    "driver_id": (
+                        str(inc.assigned_driver_id) if inc.assigned_driver_id else None
+                    ),
+                    "vehicle_id": (
+                        str(inc.assigned_vehicle_id)
+                        if inc.assigned_vehicle_id
+                        else None
+                    ),
+                    "plate_number": (
+                        assigned_vehicle.plate_number if assigned_vehicle else None
+                    ),
+                    "assigned_at": (
+                        inc.assigned_at.isoformat()
+                        if inc.assigned_at
+                        else datetime.now(timezone.utc).isoformat()
+                    ),
+                    "status": inc.status.value,
+                },
+            )
         await ws_manager.broadcast_event(
             event_type="INCIDENT_UPDATED",
             data={
@@ -442,6 +529,9 @@ async def update_incident(
                 "priority": inc.priority.value,
                 "assigned_vehicle_id": (
                     str(inc.assigned_vehicle_id) if inc.assigned_vehicle_id else None
+                ),
+                "assigned_driver_id": (
+                    str(inc.assigned_driver_id) if inc.assigned_driver_id else None
                 ),
             },
         )

@@ -64,6 +64,7 @@ const MapLibreView = dynamic(() => import("@/components/map/MapLibreView"), {
 
 interface IncidentItem {
   id: string;
+  rawId?: string;
   title: string;
   category: string;
   priority: "P0" | "P1" | "P2" | "P3" | "P4";
@@ -115,11 +116,14 @@ interface BackendReportItem {
 
 interface FleetVehicle {
   id: string;
+  rawId?: string;
   plate: string;
   type: string;
   capacityKg: number;
   currentLoadKg: number;
   status: "AVAILABLE" | "ASSIGNED" | "EN_ROUTE" | "COLLECTING" | "MAINTENANCE";
+  driverId?: string;
+  driverName?: string;
   driver?: string;
   lat: number;
   lng: number;
@@ -360,6 +364,7 @@ export default function OfficerPage() {
 
             return {
               id: `WW-${String(inc.id).slice(0, 8).toUpperCase()}`,
+              rawId: String(inc.id),
               title: inc.title || `${(inc.category || "Mixed").toUpperCase()} at ${inc.address_text?.split(',')[0] || "Gandhinagar"}`,
               category: (inc.category || "Mixed").toUpperCase(),
               priority: inc.priority || "P3",
@@ -372,7 +377,7 @@ export default function OfficerPage() {
               latestReportAt: latestReportAtStr,
               slaMinutesLeft: slaLeft,
               sensitiveLocation: isP0 ? "Hospital Buffer Zone (<200m)" : inc.address_text || undefined,
-              assignedTruck: inc.assigned_vehicle_id ? "GJ-01-WM-4402 (Assigned)" : undefined,
+              assignedTruck: inc.assigned_vehicle_id ? "Assigned Vehicle" : undefined,
             };
           });
 
@@ -421,14 +426,17 @@ export default function OfficerPage() {
       if (resVehicles.ok) {
         const vehData = await resVehicles.json();
         if (Array.isArray(vehData) && vehData.length > 0) {
-          const mappedVehicles: FleetVehicle[] = vehData.map((v: { id: string; plate_number: string; vehicle_type: string; capacity_kg: number; current_load_kg?: number; status: FleetVehicle["status"]; current_lat?: number; current_lng?: number }) => ({
+          const mappedVehicles: FleetVehicle[] = vehData.map((v: { id: string; plate_number: string; vehicle_type: string; capacity_kg: number; current_load_kg?: number; status: FleetVehicle["status"]; current_lat?: number; current_lng?: number; driver_id?: string; driver_name?: string }) => ({
             id: `VEH-${String(v.id).slice(0, 6).toUpperCase()}`,
+            rawId: String(v.id),
             plate: v.plate_number,
             type: v.vehicle_type,
             capacityKg: Number(v.capacity_kg),
             currentLoadKg: Number(v.current_load_kg || 0),
             status: v.status,
-            driver: "Assigned Driver",
+            driverId: v.driver_id,
+            driverName: v.driver_name || "Assigned Driver",
+            driver: v.driver_name ? `${v.driver_name} (${v.plate_number})` : `${v.plate_number} (Driver)`,
             lat: Number(v.current_lat || 23.025),
             lng: Number(v.current_lng || 72.578),
             zone: "Sector 12 Hospital Zone",
@@ -503,33 +511,46 @@ export default function OfficerPage() {
     });
 
   const handleDispatch = async (id: string) => {
+    const incObj = incidents.find((i) => i.id === id || i.rawId === id);
+    const targetRawId = incObj?.rawId || id.replace("WW-", "");
+    const availableVeh = vehicles.find((v) => v.status === "AVAILABLE") || vehicles[0];
+
+    const truckLabel = availableVeh ? `${availableVeh.plate} (${availableVeh.driverName || "Assigned Driver"})` : "GJ-01-WM-4402 (Assigned)";
+
     setIncidents((prev) =>
       prev.map((inc) =>
-        inc.id === id
+        inc.id === id || inc.rawId === targetRawId
           ? {
               ...inc,
               status: "ASSIGNED",
-              assignedTruck: "GJ-01-WM-8820 (Best-fit Auto Assigned)",
+              assignedTruck: truckLabel,
             }
           : inc
       )
     );
 
-    // Persist status change to backend if available
+    // Persist status change to backend
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-      // Find matching incident or use id
-      await fetch(`${apiUrl}/api/v1/incidents/${id.replace("WW-", "")}`, {
+      const payload: Record<string, string | undefined> = { status: "ASSIGNED" };
+      if (availableVeh?.rawId) {
+        payload.assigned_vehicle_id = availableVeh.rawId;
+      }
+      await fetch(`${apiUrl}/api/v1/incidents/${targetRawId}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "ASSIGNED" }),
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify(payload),
       });
+      void fetchBackendData();
     } catch {}
   };
 
   // Open report detail drawer for an incident
   const handleViewReports = (incidentId: string) => {
-    const reports = citizenReports.filter((r) => r.incidentId === incidentId);
+    const reports = citizenReports.filter((r) => r.incidentId === incidentId || r.rawIncidentId === incidentId);
     if (reports.length > 0) {
       setSelectedReportDetail(reports[0]);
       setReportDrawerOpen(true);
@@ -541,7 +562,7 @@ export default function OfficerPage() {
 
   // Get all citizen reports for a given incident
   const getReportsForIncident = (incidentId: string) => {
-    return citizenReports.filter((r) => r.incidentId === incidentId);
+    return citizenReports.filter((r) => r.incidentId === incidentId || r.rawIncidentId === incidentId);
   };
 
   // Officer action handlers on citizen reports
@@ -557,15 +578,20 @@ export default function OfficerPage() {
     const report = citizenReports.find((r) => r.reportId === reportId);
     if (report && (action === "APPROVED" || action === "ESCALATED")) {
       const priorityToSet = manualSeverity !== "DEFAULT" ? manualSeverity : action === "ESCALATED" ? "P0" : undefined;
-      const truckToSet = manualTruck !== "AUTO" ? manualTruck : "GJ-01-WM-4402 (Ramesh Patel)";
+      
+      const selectedVeh = manualTruck !== "AUTO" 
+        ? vehicles.find((v) => v.rawId === manualTruck || v.id === manualTruck) 
+        : vehicles.find((v) => v.status === "AVAILABLE") || vehicles[0];
+
+      const truckLabel = selectedVeh ? `${selectedVeh.plate} (${selectedVeh.driverName || "Assigned Driver"})` : "GJ-01-WM-4402 (Assigned)";
       
       setIncidents((prev) =>
         prev.map((inc) => {
-          if (inc.id === report.incidentId) {
+          if (inc.id === report.incidentId || inc.rawId === report.rawIncidentId) {
             return {
               ...inc,
               ...(priorityToSet ? { priority: priorityToSet as IncidentItem["priority"] } : {}),
-              ...(action === "APPROVED" ? { status: "ASSIGNED", assignedTruck: truckToSet } : {})
+              ...(action === "APPROVED" ? { status: "ASSIGNED", assignedTruck: truckLabel } : {})
             };
           }
           return inc;
@@ -575,15 +601,29 @@ export default function OfficerPage() {
       // Persist to Supabase backend
       try {
         const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-        const patchPayload: Record<string, string> = {};
-        if (action === "APPROVED") patchPayload.status = "ASSIGNED";
+        const patchPayload: Record<string, string | undefined> = {};
+        if (action === "APPROVED") {
+          patchPayload.status = "ASSIGNED";
+          if (selectedVeh?.rawId) {
+            patchPayload.assigned_vehicle_id = selectedVeh.rawId;
+          }
+        }
         if (priorityToSet) patchPayload.priority = priorityToSet;
-        await fetch(`${apiUrl}/api/v1/incidents/${report.incidentId.replace("WW-", "")}`, {
+        if (officerActionNote) patchPayload.description = officerActionNote;
+
+        const targetRawId = report.rawIncidentId || report.incidentId.replace("WW-", "");
+        await fetch(`${apiUrl}/api/v1/incidents/${targetRawId}`, {
           method: "PATCH",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            ...getAuthHeaders(),
+          },
           body: JSON.stringify(patchPayload),
         });
-      } catch {}
+        void fetchBackendData();
+      } catch (err) {
+        console.warn("Error patching incident", err);
+      }
     }
 
     const actionLabels = { APPROVED: "Approved & Dispatched", ESCALATED: "Escalated to P0", REJECTED: "Rejected", DUPLICATE: "Marked Duplicate" };
@@ -2154,12 +2194,12 @@ export default function OfficerPage() {
                         <select 
                           value={manualTruck}
                           onChange={(e) => setManualTruck(e.target.value)}
-                          className="w-full text-xs p-1.5 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-[var(--color-primary)] bg-white"
+                          className="w-full text-xs p-1.5 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-[var(--color-primary)] bg-white font-medium text-slate-800"
                         >
-                          <option value="AUTO">Auto-Assign Best Truck</option>
+                          <option value="AUTO">Auto-Assign Best Available Vehicle</option>
                           {vehicles.map(v => (
-                            <option key={v.id} value={`${v.plate} (${v.driver})`}>
-                              {v.plate} ({v.driver})
+                            <option key={v.rawId || v.id} value={v.rawId || v.id}>
+                              {v.plate} — {v.driverName || "Assigned Driver"} ({v.type})
                             </option>
                           ))}
                         </select>

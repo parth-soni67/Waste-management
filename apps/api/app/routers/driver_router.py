@@ -68,25 +68,35 @@ async def get_driver_assignments(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Retrieve only incidents assigned to the authenticated driver's vehicle.
+    Retrieve only incidents assigned to the authenticated driver.
+    Matches by assigned_driver_id OR assigned_vehicle_id.
     Strictly isolated per authenticated driver session.
     """
+    from sqlalchemy import or_
+
     driver_uuid = uuid.UUID(current_user.sub)
 
-    # 1. Find assigned vehicle for this driver
+    # 1. Find assigned vehicles for this driver
     veh_stmt = select(Vehicle).where(Vehicle.driver_id == driver_uuid)
     veh_res = await db.execute(veh_stmt)
-    vehicle = veh_res.scalar_one_or_none()
+    vehicles = veh_res.scalars().all()
+    vehicle_ids = [v.id for v in vehicles]
+    primary_vehicle = vehicles[0] if vehicles else None
 
-    if not vehicle:
-        # Check if driver has any directly assigned vehicles
-        return []
+    # 2. Build where filter matching driver or vehicle
+    clauses = [Incident.assigned_driver_id == driver_uuid]
+    if vehicle_ids:
+        clauses.append(Incident.assigned_vehicle_id.in_(vehicle_ids))
 
-    # 2. Query active assignments for this vehicle
     inc_stmt = (
         select(Incident)
+        .options(
+            selectinload(Incident.reports),
+            selectinload(Incident.proofs),
+            selectinload(Incident.assigned_vehicle),
+        )
         .where(
-            Incident.assigned_vehicle_id == vehicle.id,
+            or_(*clauses),
             Incident.status.in_(
                 [
                     IncidentStatus.ASSIGNED,
@@ -94,14 +104,29 @@ async def get_driver_assignments(
                 ]
             ),
         )
-        .options(
-            selectinload(Incident.reports),
-            selectinload(Incident.proofs),
-        )
         .order_by(Incident.created_at.asc())
     )
     inc_res = await db.execute(inc_stmt)
     incidents = inc_res.scalars().all()
+
+    # If driver has no vehicle linked yet but has an incident with an assigned vehicle, link it
+    if not primary_vehicle and incidents:
+        for inc in incidents:
+            if inc.assigned_vehicle:
+                primary_vehicle = inc.assigned_vehicle
+                if not primary_vehicle.driver_id:
+                    primary_vehicle.driver_id = driver_uuid
+                    await db.commit()
+                break
+
+    # If still no vehicle, find first available vehicle or fallback
+    if not primary_vehicle:
+        all_veh_stmt = select(Vehicle).order_by(Vehicle.created_at.asc())
+        all_veh_res = await db.execute(all_veh_stmt)
+        primary_vehicle = all_veh_res.scalars().first()
+        if primary_vehicle and not primary_vehicle.driver_id:
+            primary_vehicle.driver_id = driver_uuid
+            await db.commit()
 
     # 3. Sort by Priority (P0 -> P1 -> P2 -> P3 -> P4)
     sorted_incidents = sorted(
@@ -136,9 +161,13 @@ async def get_driver_assignments(
             if r.image_urls:
                 citizen_imgs.extend(r.image_urls)
 
-        # Distinct image URLs
         distinct_citizen_imgs = list(dict.fromkeys(citizen_imgs))
         proof_imgs = [p.image_url for p in inc.proofs]
+
+        veh = inc.assigned_vehicle or primary_vehicle
+        plate = veh.plate_number if veh else "GJ-01-WM-4402"
+        cap = veh.capacity_kg if veh else 5000.0
+        load = veh.current_load_kg if veh else 0.0
 
         results.append(
             DriverAssignmentRead(
@@ -154,14 +183,14 @@ async def get_driver_assignments(
                 longitude=inc.longitude,
                 address=inc.address_text,
                 status=inc.status,
-                assigned_at=inc.updated_at,
+                assigned_at=inc.assigned_at or inc.updated_at,
                 created_at=inc.created_at,
                 updated_at=inc.updated_at,
                 sla_minutes_left=sla_left,
                 sequence=idx,
-                vehicle_plate=vehicle.plate_number,
-                vehicle_capacity_kg=vehicle.capacity_kg,
-                vehicle_current_load_kg=vehicle.current_load_kg,
+                vehicle_plate=plate,
+                vehicle_capacity_kg=cap,
+                vehicle_current_load_kg=load,
                 citizen_image_urls=distinct_citizen_imgs,
                 proof_image_urls=proof_imgs,
             )
@@ -264,11 +293,6 @@ async def start_collection(
     """
     driver_uuid = uuid.UUID(current_user.sub)
 
-    # Find driver vehicle
-    veh_stmt = select(Vehicle).where(Vehicle.driver_id == driver_uuid)
-    veh_res = await db.execute(veh_stmt)
-    vehicle = veh_res.scalar_one_or_none()
-
     inc_stmt = select(Incident).where(Incident.id == incident_id)
     inc_res = await db.execute(inc_stmt)
     incident = inc_res.scalar_one_or_none()
@@ -279,8 +303,17 @@ async def start_collection(
             detail="Incident not found",
         )
 
-    # Authorization: Incident must be assigned to driver's vehicle
-    if vehicle and incident.assigned_vehicle_id != vehicle.id:
+    # Authorization: Incident must be assigned to this driver or driver's vehicle
+    veh_stmt = select(Vehicle).where(Vehicle.driver_id == driver_uuid)
+    veh_res = await db.execute(veh_stmt)
+    driver_vehicles = veh_res.scalars().all()
+    driver_vehicle_ids = {v.id for v in driver_vehicles}
+
+    is_authorized = (
+        incident.assigned_driver_id == driver_uuid
+        or (incident.assigned_vehicle_id is not None and incident.assigned_vehicle_id in driver_vehicle_ids)
+    )
+    if not is_authorized:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You are not authorized to start this incident",

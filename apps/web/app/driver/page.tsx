@@ -264,7 +264,7 @@ export default function DriverPage() {
     };
   }, [driverLocation, assignments, activeIncidentId]);
 
-  // 4. WebSocket Real-time Event Subscription
+  // 4. WebSocket Real-time Event Subscription & Background Sync
   useEffect(() => {
     if (typeof window === "undefined") return;
 
@@ -273,32 +273,48 @@ export default function DriverPage() {
     let reconnectTimeout: NodeJS.Timeout;
 
     const connectWs = () => {
-      ws = new WebSocket(wsUrl);
-      ws.onmessage = (event) => {
-        try {
-          const msg = JSON.parse(event.data);
-          if (
-            msg.type === "NEW_INCIDENT_ASSIGNED" ||
-            msg.type === "ROUTE_UPDATED" ||
-            msg.type === "INCIDENT_COLLECTED" ||
-            msg.type === "COLLECTION_PROOF_UPLOADED"
-          ) {
-            void fetchAssignments();
+      try {
+        ws = new WebSocket(wsUrl);
+        ws.onmessage = (event) => {
+          try {
+            const msg = JSON.parse(event.data);
+            if (
+              msg.type === "INCIDENT_ASSIGNED" ||
+              msg.type === "NEW_INCIDENT_ASSIGNED" ||
+              msg.type === "INCIDENT_UPDATED" ||
+              msg.type === "ROUTE_UPDATED" ||
+              msg.type === "INCIDENT_COLLECTED" ||
+              msg.type === "COLLECTION_PROOF_UPLOADED"
+            ) {
+              if (msg.type === "INCIDENT_ASSIGNED" || msg.type === "NEW_INCIDENT_ASSIGNED") {
+                setActionSuccess("🚨 New waste collection stop assigned by Municipal Officer!");
+                setTimeout(() => setActionSuccess(null), 5000);
+              }
+              void fetchAssignments();
+            }
+          } catch (e) {
+            console.warn("WebSocket parse error", e);
           }
-        } catch (e) {
-          console.warn("WebSocket parse error", e);
-        }
-      };
+        };
 
-      ws.onclose = () => {
-        reconnectTimeout = setTimeout(connectWs, 5000);
-      };
+        ws.onclose = () => {
+          reconnectTimeout = setTimeout(connectWs, 5000);
+        };
+      } catch (err) {
+        console.warn("WebSocket init error", err);
+      }
     };
 
     connectWs();
 
+    // 4-second sync interval to guarantee persistent real-time accuracy with Supabase PostgreSQL
+    const syncInterval = setInterval(() => {
+      void fetchAssignments();
+    }, 4000);
+
     return () => {
       clearTimeout(reconnectTimeout);
+      clearInterval(syncInterval);
       ws?.close();
     };
   }, [apiUrl, fetchAssignments]);
