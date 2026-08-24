@@ -20,18 +20,28 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from app.core.config import settings
-from app.core.db import Base
-
-# Import all models here so Base.metadata has them for autogenerate
-# Phase 1+ will add: from app.models.user import User, etc.
+from app.core.db import Base, engine
+import app.models.entities  # noqa: F401
 
 config = context.config
-config.set_main_option("sqlalchemy.url", settings.database_url_sync)
+db_async_url = settings.DATABASE_URL
+if db_async_url.startswith("postgres://"):
+    db_async_url = db_async_url.replace("postgres://", "postgresql+asyncpg://", 1)
+elif db_async_url.startswith("postgresql://") and not db_async_url.startswith("postgresql+asyncpg://"):
+    db_async_url = db_async_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+config.set_main_option("sqlalchemy.url", db_async_url)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
+
+
+def include_object(object, name, type_, reflected, compare_to):
+    if type_ == "table" and name in ("spatial_ref_sys", "geography_columns", "geometry_columns"):
+        return False
+    return True
 
 
 def run_migrations_offline() -> None:
@@ -42,6 +52,7 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        include_object=include_object,
     )
 
     with context.begin_transaction():
@@ -49,23 +60,19 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
-    context.configure(connection=connection, target_metadata=target_metadata)
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        include_object=include_object,
+    )
     with context.begin_transaction():
         context.run_migrations()
 
 
 async def run_async_migrations() -> None:
-    """Run migrations in 'online' mode with an async engine."""
-    connectable = async_engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
-
-    async with connectable.connect() as connection:
+    """Run migrations in 'online' mode with the app async engine."""
+    async with engine.connect() as connection:
         await connection.run_sync(do_run_migrations)
-
-    await connectable.dispose()
 
 
 def run_migrations_online() -> None:

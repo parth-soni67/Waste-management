@@ -23,13 +23,36 @@ import Link from "next/link";
 
 interface CitizenReport {
   id: string;
+  incidentId?: string;
   category: string;
   description: string;
   address: string;
   status: "REPORTED" | "ASSIGNED" | "COLLECTING" | "COLLECTED" | "VERIFIED" | "REOPENED";
   priority: "P0" | "P1" | "P2" | "P3" | "P4";
+  severityScore?: number;
+  confidence?: number;
+  volumeM3?: number;
   createdAt: string;
   imageCount: number;
+}
+
+interface BackendReportItem {
+  id: string;
+  incident_id?: string;
+  category?: string;
+  confidence?: number;
+  estimated_volume_m3?: number;
+  severity_score?: number;
+  detected_tags?: string[];
+  recommended_action?: string;
+  description?: string;
+  image_urls?: string[];
+  latitude?: number;
+  longitude?: number;
+  address_text?: string;
+  status?: string;
+  priority?: "P0" | "P1" | "P2" | "P3" | "P4";
+  created_at?: string;
 }
 
 interface CVAnalysis {
@@ -262,72 +285,147 @@ export default function CitizenPage() {
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // Fetch citizen reports from Supabase backend on load
+  useEffect(() => {
+    const fetchPersistedReports = async () => {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      try {
+        const res = await fetch(`${apiUrl}/api/v1/reports`);
+        if (res.ok) {
+          const data: BackendReportItem[] = await res.json();
+          if (Array.isArray(data) && data.length > 0) {
+            const mapped: CitizenReport[] = data.map((r: BackendReportItem) => ({
+              id: `REP-${String(r.id).slice(0, 8).toUpperCase()}`,
+              incidentId: r.incident_id ? `WW-${String(r.incident_id).slice(0, 8).toUpperCase()}` : undefined,
+              category: r.category ? r.category.toUpperCase() : "MIXED",
+              description: r.description || "Citizen reported waste accumulation.",
+              address: r.address_text || `GPS: ${r.latitude?.toFixed(4) || "23.0330"}°N, ${r.longitude?.toFixed(4) || "72.5860"}°E`,
+              status: (r.status as CitizenReport["status"]) || "REPORTED",
+              priority: r.priority || "P3",
+              severityScore: r.severity_score,
+              confidence: r.confidence,
+              volumeM3: r.estimated_volume_m3,
+              createdAt: r.created_at ? new Date(r.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "Just now",
+              imageCount: Array.isArray(r.image_urls) ? r.image_urls.length : 0,
+            }));
+            setReportsList(mapped);
+          }
+        }
+      } catch (err) {
+        console.warn("Backend reports fetch failed, using local fallback", err);
+      }
+    };
+    const timer = setTimeout(() => {
+      void fetchPersistedReports();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
 
-    setTimeout(() => {
-      const newReport: CitizenReport = {
-        id: `REP-${Math.floor(1000 + Math.random() * 9000)}`,
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    const reportPayload = {
+      category: (aiAnalysis?.category || category).toLowerCase().replace(/\s+/g, '_').split('/')[0].trim(),
+      confidence: aiAnalysis?.confidence ?? 0.90,
+      estimated_volume_m3: aiAnalysis?.volumeM3 ?? 1.5,
+      severity_score: aiAnalysis?.severityScore ?? 5.0,
+      detected_tags: aiAnalysis?.tags || [],
+      recommended_action: aiAnalysis?.recommendedAction || "Deploy municipal collection vehicle",
+      description: description || "Citizen reported waste accumulation.",
+      image_urls: [], // safe, avoid base64 bloat in DB
+      latitude: coords?.lat ?? 23.0330,
+      longitude: coords?.lng ?? 72.5860,
+      address_text: address,
+    };
+
+    try {
+      const res = await fetch(`${apiUrl}/api/v1/reports`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(reportPayload),
+      });
+
+      if (res.ok) {
+        const persistedData = await res.json();
+        const generatedReportId = `REP-${String(persistedData.id).slice(0, 8).toUpperCase()}`;
+        const generatedIncidentId = persistedData.incident_id
+          ? `WW-${String(persistedData.incident_id).slice(0, 8).toUpperCase()}`
+          : `WW-${String(persistedData.id).slice(0, 8).toUpperCase()}`;
+
+        const newReport: CitizenReport = {
+          id: generatedReportId,
+          incidentId: generatedIncidentId,
+          category: (persistedData.category || category).toUpperCase(),
+          description: description || "No description provided.",
+          address: address,
+          status: persistedData.status || "REPORTED",
+          priority: persistedData.priority || "P3",
+          severityScore: persistedData.severity_score,
+          confidence: persistedData.confidence,
+          volumeM3: persistedData.estimated_volume_m3,
+          createdAt: "Just now",
+          imageCount: images.length,
+        };
+
+        // Broadcast to LocalStorage for offline fallback support
+        try {
+          const officerIncident = {
+            id: generatedIncidentId,
+            title: `${(persistedData.category || category).toUpperCase()} at ${address.split(',')[0]}`,
+            category: (persistedData.category || category).toUpperCase(),
+            priority: newReport.priority,
+            status: newReport.status,
+            lat: coords?.lat || 23.0330,
+            lng: coords?.lng || 72.5860,
+            reportsCount: 1,
+            timeAgo: "Just now",
+            slaMinutesLeft: newReport.priority === "P0" ? 60 : newReport.priority === "P1" ? 120 : 240,
+          };
+          const existingIncidents = JSON.parse(localStorage.getItem("sync_incidents") || "[]");
+          localStorage.setItem("sync_incidents", JSON.stringify([officerIncident, ...existingIncidents]));
+          window.dispatchEvent(new Event("storage"));
+        } catch (e) {
+          console.warn("Storage sync failed", e);
+        }
+
+        setReportsList((prev) => [newReport, ...prev]);
+        setSubmittedReport(newReport);
+        setImages([]);
+        setDescription("");
+        setAiAnalysis(null);
+      } else {
+        throw new Error(`Server returned ${res.status}`);
+      }
+    } catch (err) {
+      console.warn("Backend report submission failed, using local offline fallback", err);
+      // Offline fallback
+      const fallbackId = `REP-${Math.floor(1000 + Math.random() * 9000)}`;
+      const fallbackIncidentId = `WW-${Math.floor(10000000 + Math.random() * 90000000)}`;
+      const fallbackReport: CitizenReport = {
+        id: fallbackId,
+        incidentId: fallbackIncidentId,
         category: category.toUpperCase(),
         description: description || "No description provided.",
         address: address,
         status: "REPORTED",
         priority: aiAnalysis?.severityScore && aiAnalysis.severityScore > 7.0 ? "P1" : "P2",
+        severityScore: aiAnalysis?.severityScore || 5.0,
         createdAt: "Just now",
         imageCount: images.length,
       };
 
-      // --- NEW: Sync to Officer Portal via localStorage ---
-      const officerIncident = {
-        id: `INC-C${Math.floor(1000 + Math.random() * 9000)}`,
-        title: `${category.toUpperCase()} at ${address.split(',')[0]}`,
-        category: category.toUpperCase(),
-        priority: newReport.priority,
-        status: "REPORTED",
-        lat: coords?.lat || 23.0330,
-        lng: coords?.lng || 72.5860,
-        reportsCount: 1,
-        timeAgo: "Just now",
-        slaMinutesLeft: newReport.priority === "P1" ? 120 : 240,
-      };
-      
-      const officerReportDetail = {
-        reportId: newReport.id,
-        incidentId: officerIncident.id,
-        reporterName: "Citizen User",
-        reporterPhone: "+91 90000 00000",
-        description: description || "No description provided.",
-        address: address,
-        category: category.toUpperCase(),
-        photos: images.length > 0 ? images : ["/demo-report-1.jpg"],
-        submittedAt: new Date().toLocaleString(),
-        aiCategory: aiAnalysis?.category || "Unknown",
-        aiConfidence: aiAnalysis?.confidence || 0.8,
-        aiSeverity: aiAnalysis?.severityScore || 5.0,
-        aiVolume: aiAnalysis?.volumeM3 || 1.0,
-        aiTags: aiAnalysis?.tags || ["user_report"],
-        aiRecommendedAction: aiAnalysis?.recommendedAction || "Investigate user report",
-      };
-
-      try {
-        const existingIncidents = JSON.parse(localStorage.getItem("sync_incidents") || "[]");
-        const existingDetails = JSON.parse(localStorage.getItem("sync_report_details") || "[]");
-        localStorage.setItem("sync_incidents", JSON.stringify([officerIncident, ...existingIncidents]));
-        localStorage.setItem("sync_report_details", JSON.stringify([officerReportDetail, ...existingDetails]));
-        window.dispatchEvent(new Event("storage"));
-      } catch (e) {
-        console.error("Storage sync failed", e);
-      }
-      // ----------------------------------------------------
-
-      setReportsList([newReport, ...reportsList]);
-      setSubmittedReport(newReport);
-      setSubmitting(false);
+      setReportsList((prev) => [fallbackReport, ...prev]);
+      setSubmittedReport(fallbackReport);
       setImages([]);
       setDescription("");
       setAiAnalysis(null);
-    }, 800);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const mounted = React.useSyncExternalStore(
@@ -421,12 +519,66 @@ export default function CitizenPage() {
                 <div className="w-14 h-14 rounded-full bg-emerald-50 text-emerald-700 flex items-center justify-center mx-auto mb-4 border border-emerald-200">
                   <CheckCircle className="w-8 h-8" />
                 </div>
-                <h2 className="text-2xl font-bold mb-2">Report Successfully Dispatched!</h2>
-                <p className="text-sm text-slate-600 max-w-md mx-auto mb-6">
-                  Ticket <span className="font-bold text-slate-900">{submittedReport.id}</span> is now
-                  queued in the Municipal Incident Engine. The Computer Vision model assigned initial priority{" "}
-                  <span className="font-bold text-amber-700">{submittedReport.priority}</span>.
+                <h2 className="text-2xl font-bold mb-1 text-slate-900">Report Submitted Successfully</h2>
+                <p className="text-xs text-slate-500 max-w-md mx-auto mb-6">
+                  Persisted directly to the Municipal Incident Engine. The AI Computer Vision model evaluated severity and priority for city dispatch.
                 </p>
+
+                {/* Structured Incident Metadata Card */}
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 mb-6 text-left max-w-md mx-auto space-y-3">
+                  <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+                    <span className="text-xs font-semibold text-slate-500">Incident ID</span>
+                    <span className="font-mono text-xs font-black text-slate-900 bg-white px-2 py-0.5 rounded border border-slate-200">
+                      {submittedReport.incidentId || submittedReport.id}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+                    <span className="text-xs font-semibold text-slate-500">Category</span>
+                    <span className="text-xs font-bold text-slate-800">{submittedReport.category}</span>
+                  </div>
+
+                  <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+                    <span className="text-xs font-semibold text-slate-500">Severity</span>
+                    <span className="text-xs font-bold text-amber-700">
+                      {submittedReport.severityScore ? `${submittedReport.severityScore} / 10.0` : "Assessed by Vision AI"}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+                    <span className="text-xs font-semibold text-slate-500">Priority</span>
+                    <span
+                      className="text-[10px] font-bold px-2 py-0.5 rounded-full text-white"
+                      style={{
+                        backgroundColor:
+                          submittedReport.priority === "P0"
+                            ? "var(--color-p0-emergency)"
+                            : submittedReport.priority === "P1"
+                            ? "var(--color-p1-veryhigh)"
+                            : submittedReport.priority === "P2"
+                            ? "var(--color-p2-high)"
+                            : "var(--color-p3-normal)",
+                      }}
+                    >
+                      {submittedReport.priority}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+                    <span className="text-xs font-semibold text-slate-500">Status</span>
+                    <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                      {submittedReport.status}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-0.5">
+                    <span className="text-xs font-semibold text-slate-500">Location</span>
+                    <span className="text-[11px] font-medium text-slate-700 truncate max-w-[220px]" title={submittedReport.address}>
+                      📍 {submittedReport.address}
+                    </span>
+                  </div>
+                </div>
+
                 <div className="flex justify-center gap-3">
                   <button
                     onClick={() => setSubmittedReport(null)}
@@ -438,7 +590,7 @@ export default function CitizenPage() {
                     onClick={() => setActiveTab("history")}
                     className="px-5 py-2.5 rounded-xl text-sm font-semibold text-white bg-[var(--color-primary)] shadow-sm hover:opacity-95 cursor-pointer"
                   >
-                    Track Resolution
+                    Track in My Reports
                   </button>
                 </div>
               </div>

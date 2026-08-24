@@ -232,6 +232,18 @@ class Incident(Base):
         String(100), nullable=True, index=True
     )
     estimated_volume_m3: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    confidence: Mapped[Optional[float]] = mapped_column(
+        Float, default=0.90, nullable=True
+    )
+    severity_score: Mapped[Optional[float]] = mapped_column(
+        Float, default=5.0, nullable=True
+    )
+    detected_tags: Mapped[List[str]] = mapped_column(JSON, default=list, nullable=False)
+    recommended_action: Mapped[Optional[str]] = mapped_column(
+        String(500), nullable=True
+    )
+    address_text: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    image_urls: Mapped[List[str]] = mapped_column(JSON, default=list, nullable=False)
     report_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     assigned_vehicle_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
@@ -262,10 +274,10 @@ class Report(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), default=uuid.uuid4, primary_key=True
     )
-    user_id: Mapped[uuid.UUID] = mapped_column(
+    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("users.id", ondelete="CASCADE"),
-        nullable=False,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
         index=True,
     )
     incident_id: Mapped[Optional[uuid.UUID]] = mapped_column(
@@ -275,6 +287,13 @@ class Report(Base):
         index=True,
     )
     category: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    severity_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    estimated_volume_m3: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    detected_tags: Mapped[List[str]] = mapped_column(JSON, default=list, nullable=False)
+    recommended_action: Mapped[Optional[str]] = mapped_column(
+        String(500), nullable=True
+    )
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     image_urls: Mapped[List[str]] = mapped_column(JSON, default=list, nullable=False)
     latitude: Mapped[float] = mapped_column(Float, nullable=False)
@@ -291,7 +310,7 @@ class Report(Base):
         nullable=False,
     )
 
-    user: Mapped["User"] = relationship("User", back_populates="reports")
+    user: Mapped[Optional["User"]] = relationship("User", back_populates="reports")
     incident: Mapped[Optional["Incident"]] = relationship(
         "Incident", back_populates="reports"
     )

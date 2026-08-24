@@ -11,7 +11,7 @@ based on:
 
 import math
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -54,6 +54,12 @@ class DuplicateClusteringService:
         category_str: Optional[str] = None,
         description: Optional[str] = None,
         address_text: Optional[str] = None,
+        confidence: Optional[float] = None,
+        estimated_volume_m3: Optional[float] = None,
+        severity_score: Optional[float] = None,
+        detected_tags: Optional[List[str]] = None,
+        recommended_action: Optional[str] = None,
+        image_urls: Optional[List[str]] = None,
     ) -> Tuple[Incident, bool]:
         """
         Evaluate if a new report matches an existing incident within 100m in the last 24h.
@@ -103,6 +109,28 @@ class DuplicateClusteringService:
             closest_incident.report_count += 1
             closest_incident.updated_at = datetime.now(timezone.utc)
 
+            # Update max severity score and volumetric addition
+            if severity_score and (
+                closest_incident.severity_score is None
+                or severity_score > closest_incident.severity_score
+            ):
+                closest_incident.severity_score = severity_score
+
+            if estimated_volume_m3:
+                closest_incident.estimated_volume_m3 = (
+                    closest_incident.estimated_volume_m3 or 0.0
+                ) + estimated_volume_m3
+
+            if detected_tags:
+                existing_tags = set(closest_incident.detected_tags or [])
+                existing_tags.update(detected_tags)
+                closest_incident.detected_tags = list(existing_tags)
+
+            if image_urls:
+                existing_imgs = list(closest_incident.image_urls or [])
+                existing_imgs.extend(image_urls)
+                closest_incident.image_urls = existing_imgs[:10]
+
             await db.flush()
             return closest_incident, True
 
@@ -122,6 +150,14 @@ class DuplicateClusteringService:
             status=IncidentStatus.REPORTED,
             latitude=report_lat,
             longitude=report_lng,
+            estimated_volume_m3=estimated_volume_m3 or 1.5,
+            confidence=confidence or 0.90,
+            severity_score=severity_score or 5.0,
+            detected_tags=detected_tags or [],
+            recommended_action=recommended_action
+            or "Deploy municipal collection vehicle to location",
+            address_text=address_text,
+            image_urls=image_urls or [],
             report_count=1,
         )
         db.add(new_incident)

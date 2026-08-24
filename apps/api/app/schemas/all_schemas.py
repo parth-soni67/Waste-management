@@ -116,25 +116,37 @@ class VehicleRead(BaseModel):
 class ReportCreate(BaseModel):
     description: Optional[str] = Field(None, max_length=2000)
     category: Optional[str] = Field(None, max_length=50)
+    confidence: Optional[float] = Field(None, ge=0.0, le=1.0)
+    estimated_volume_m3: Optional[float] = Field(None, ge=0.0)
+    severity_score: Optional[float] = Field(None, ge=0.0, le=10.0)
+    detected_tags: List[str] = Field(default_factory=list)
+    recommended_action: Optional[str] = Field(None, max_length=500)
     image_urls: List[str] = Field(default_factory=list, max_length=5)
     latitude: float = Field(ge=-90.0, le=90.0)
     longitude: float = Field(ge=-180.0, le=180.0)
     address_text: Optional[str] = Field(None, max_length=500)
+    is_fallback: Optional[bool] = False
 
 
 class ReportRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    user_id: uuid.UUID
+    user_id: Optional[uuid.UUID] = None
     incident_id: Optional[uuid.UUID] = None
     category: Optional[str] = None
+    confidence: Optional[float] = None
+    estimated_volume_m3: Optional[float] = None
+    severity_score: Optional[float] = None
+    detected_tags: List[str] = Field(default_factory=list)
+    recommended_action: Optional[str] = None
     description: Optional[str] = None
-    image_urls: List[str]
+    image_urls: List[str] = Field(default_factory=list)
     latitude: float
     longitude: float
     address_text: Optional[str] = None
     status: IncidentStatus
+    priority: Optional[PriorityLevel] = None
     created_at: datetime
 
 
@@ -148,10 +160,17 @@ class IncidentCreate(BaseModel):
     description: Optional[str] = None
     category: WasteCategory = WasteCategory.MIXED
     priority: PriorityLevel = PriorityLevel.P3
+    status: IncidentStatus = IncidentStatus.REPORTED
     latitude: float = Field(ge=-90.0, le=90.0)
     longitude: float = Field(ge=-180.0, le=180.0)
     zone_id: Optional[str] = None
     estimated_volume_m3: Optional[float] = None
+    confidence: Optional[float] = None
+    severity_score: Optional[float] = None
+    detected_tags: List[str] = Field(default_factory=list)
+    recommended_action: Optional[str] = None
+    address_text: Optional[str] = None
+    image_urls: List[str] = Field(default_factory=list)
 
 
 class IncidentUpdate(BaseModel):
@@ -161,6 +180,8 @@ class IncidentUpdate(BaseModel):
     status: Optional[IncidentStatus] = None
     assigned_vehicle_id: Optional[uuid.UUID] = None
     estimated_volume_m3: Optional[float] = None
+    severity_score: Optional[float] = None
+    recommended_action: Optional[str] = None
 
 
 class IncidentRead(BaseModel):
@@ -176,6 +197,12 @@ class IncidentRead(BaseModel):
     longitude: float
     zone_id: Optional[str] = None
     estimated_volume_m3: Optional[float] = None
+    confidence: Optional[float] = None
+    severity_score: Optional[float] = None
+    detected_tags: List[str] = Field(default_factory=list)
+    recommended_action: Optional[str] = None
+    address_text: Optional[str] = None
+    image_urls: List[str] = Field(default_factory=list)
     report_count: int
     assigned_vehicle_id: Optional[uuid.UUID] = None
     created_at: datetime

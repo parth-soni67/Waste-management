@@ -73,6 +73,39 @@ interface IncidentItem {
   sensitiveLocation?: string;
 }
 
+interface BackendIncidentItem {
+  id: string;
+  title?: string;
+  category?: string;
+  priority?: "P0" | "P1" | "P2" | "P3" | "P4";
+  status?: "REPORTED" | "ASSIGNED" | "IN_PROGRESS" | "COLLECTED" | "VERIFIED";
+  latitude: number;
+  longitude: number;
+  report_count?: number;
+  address_text?: string;
+  assigned_vehicle_id?: string;
+  created_at?: string;
+}
+
+interface BackendReportItem {
+  id: string;
+  incident_id?: string;
+  category?: string;
+  confidence?: number;
+  estimated_volume_m3?: number;
+  severity_score?: number;
+  detected_tags?: string[];
+  recommended_action?: string;
+  description?: string;
+  image_urls?: string[];
+  latitude?: number;
+  longitude?: number;
+  address_text?: string;
+  status?: string;
+  priority?: "P0" | "P1" | "P2" | "P3" | "P4";
+  created_at?: string;
+}
+
 interface FleetVehicle {
   id: string;
   plate: string;
@@ -435,7 +468,107 @@ export default function OfficerPage() {
     return points;
   }, [incidents, vehicles, showHotspots]);
 
+  // Real-time Supabase / PostgreSQL Incident & Report fetch
+  const fetchBackendData = React.useCallback(async () => {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    try {
+      // 1. Fetch Incidents from Supabase DB
+      const resIncidents = await fetch(`${apiUrl}/api/v1/incidents`);
+      if (resIncidents.ok) {
+        const data: BackendIncidentItem[] = await resIncidents.json();
+        if (Array.isArray(data) && data.length > 0) {
+          const mappedIncidents: IncidentItem[] = data.map((inc: BackendIncidentItem) => {
+            const isP0 = inc.priority === "P0";
+            const createdDate = inc.created_at ? new Date(inc.created_at) : new Date();
+            const elapsedMins = Math.max(0, Math.round((Date.now() - createdDate.getTime()) / 60000));
+            const timeAgoStr = elapsedMins === 0 ? "Just now" : elapsedMins < 60 ? `${elapsedMins}m ago` : `${Math.floor(elapsedMins / 60)}h ago`;
+            const slaLeft = isP0 ? Math.max(10, 45 - elapsedMins) : inc.priority === "P1" ? Math.max(20, 120 - elapsedMins) : Math.max(60, 240 - elapsedMins);
+
+            return {
+              id: `WW-${String(inc.id).slice(0, 8).toUpperCase()}`,
+              title: inc.title || `${(inc.category || "Mixed").toUpperCase()} at ${inc.address_text?.split(',')[0] || "Gandhinagar"}`,
+              category: (inc.category || "Mixed").toUpperCase(),
+              priority: inc.priority || "P3",
+              status: inc.status || "REPORTED",
+              lat: Number(inc.latitude),
+              lng: Number(inc.longitude),
+              reportsCount: inc.report_count || 1,
+              timeAgo: timeAgoStr,
+              slaMinutesLeft: slaLeft,
+              sensitiveLocation: isP0 ? "Hospital Buffer Zone (<200m)" : inc.address_text || undefined,
+              assignedTruck: inc.assigned_vehicle_id ? "GJ-01-WM-4402 (Assigned)" : undefined,
+            };
+          });
+
+          setIncidents(prev => {
+            // Merge with any simulated items or distinct IDs
+            const backendIds = new Set(mappedIncidents.map(i => i.id));
+            const retainedCustom = prev.filter(i => !backendIds.has(i.id) && i.id.startsWith("INC-P0"));
+            return [...mappedIncidents, ...retainedCustom];
+          });
+        }
+      }
+
+      // 2. Fetch Reports from Supabase DB
+      const resReports = await fetch(`${apiUrl}/api/v1/reports`);
+      if (resReports.ok) {
+        const repData: BackendReportItem[] = await resReports.json();
+        if (Array.isArray(repData) && repData.length > 0) {
+          const mappedReports: CitizenReportDetail[] = repData.map((r: BackendReportItem) => ({
+            reportId: `REP-${String(r.id).slice(0, 8).toUpperCase()}`,
+            incidentId: r.incident_id ? `WW-${String(r.incident_id).slice(0, 8).toUpperCase()}` : `WW-${String(r.id).slice(0, 8).toUpperCase()}`,
+            reporterName: "Citizen Reporter",
+            reporterPhone: "+91 98765 00000",
+            description: r.description || "Reported municipal waste accumulation.",
+            address: r.address_text || `GPS: ${r.latitude?.toFixed(4) || "23.0330"}°N, ${r.longitude?.toFixed(4) || "72.5860"}°E`,
+            category: (r.category || "Mixed").toUpperCase(),
+            photos: Array.isArray(r.image_urls) && r.image_urls.length > 0 ? r.image_urls : ["/demo-report-1.jpg"],
+            submittedAt: r.created_at ? new Date(r.created_at).toLocaleString() : "Just now",
+            aiCategory: (r.category || "Mixed").toUpperCase(),
+            aiConfidence: Number(r.confidence ?? 0.92),
+            aiSeverity: Number(r.severity_score ?? 6.0),
+            aiVolume: Number(r.estimated_volume_m3 ?? 2.0),
+            aiTags: Array.isArray(r.detected_tags) ? r.detected_tags : ["municipal_waste"],
+            aiRecommendedAction: r.recommended_action || "Deploy municipal compactor vehicle",
+          }));
+
+          setCitizenReports(prev => {
+            const reportIds = new Set(mappedReports.map(r => r.reportId));
+            const remaining = prev.filter(r => !reportIds.has(r.reportId));
+            return [...mappedReports, ...remaining];
+          });
+        }
+      }
+    } catch (e) {
+      console.warn("Could not connect to Supabase backend, using local state", e);
+    }
+  }, []);
+
   useEffect(() => {
+    // Initial fetch on mount via timer to avoid setState directly in effect
+    const initialTimer = setTimeout(() => {
+      void fetchBackendData();
+    }, 0);
+
+    // 1. WebSocket connection for real-time live events
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    const wsUrl = apiUrl.replace(/^http/, "ws") + "/api/v1/optimization/ws";
+    let ws: WebSocket | null = null;
+    try {
+      ws = new WebSocket(wsUrl);
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === "NEW_INCIDENT_REPORTED" || msg.type === "INCIDENT_UPDATED" || msg.type === "LOOP_C_DYNAMIC_REROUTE") {
+            void fetchBackendData();
+          }
+        } catch {}
+      };
+    } catch (err) {
+      console.warn("WebSocket init fallback", err);
+    }
+
+    // 2. LocalStorage sync fallback
     const loadSyncedData = () => {
       try {
         const syncedIncidents = JSON.parse(localStorage.getItem("sync_incidents") || "[]");
@@ -463,18 +596,21 @@ export default function OfficerPage() {
       }
     };
 
-    loadSyncedData();
     window.addEventListener("storage", loadSyncedData);
     
-    // Fallback: poll every 2s for demo purposes just in case they are in the same tab/window 
-    // where storage events might not fire properly for the same document
-    const interval = setInterval(loadSyncedData, 2000);
+    // Polling interval (every 4s) to keep dashboard synchronized with Supabase DB
+    const interval = setInterval(() => {
+      void fetchBackendData();
+      loadSyncedData();
+    }, 4000);
 
     return () => {
+      clearTimeout(initialTimer);
+      if (ws) ws.close();
       window.removeEventListener("storage", loadSyncedData);
       clearInterval(interval);
     };
-  }, []);
+  }, [fetchBackendData]);
 
   const getMinutes = (timeStr: string) => {
     if (timeStr === "Just now") return 0;
@@ -502,7 +638,7 @@ export default function OfficerPage() {
       return filterTime === "LATEST" ? minsA - minsB : minsB - minsA;
     });
 
-  const handleDispatch = (id: string) => {
+  const handleDispatch = async (id: string) => {
     setIncidents((prev) =>
       prev.map((inc) =>
         inc.id === id
@@ -514,6 +650,17 @@ export default function OfficerPage() {
           : inc
       )
     );
+
+    // Persist status change to backend if available
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      // Find matching incident or use id
+      await fetch(`${apiUrl}/api/v1/incidents/${id.replace("WW-", "")}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "ASSIGNED" }),
+      });
+    } catch {}
   };
 
   // Open report detail drawer for an incident
@@ -534,7 +681,7 @@ export default function OfficerPage() {
   };
 
   // Officer action handlers on citizen reports
-  const handleOfficerAction = (reportId: string, action: CitizenReportDetail["officerAction"]) => {
+  const handleOfficerAction = async (reportId: string, action: CitizenReportDetail["officerAction"]) => {
     setCitizenReports((prev) =>
       prev.map((r) =>
         r.reportId === reportId
@@ -560,6 +707,19 @@ export default function OfficerPage() {
           return inc;
         })
       );
+
+      // Persist to Supabase backend
+      try {
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+        const patchPayload: Record<string, string> = {};
+        if (action === "APPROVED") patchPayload.status = "ASSIGNED";
+        if (priorityToSet) patchPayload.priority = priorityToSet;
+        await fetch(`${apiUrl}/api/v1/incidents/${report.incidentId.replace("WW-", "")}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(patchPayload),
+        });
+      } catch {}
     }
 
     const actionLabels = { APPROVED: "Approved & Dispatched", ESCALATED: "Escalated to P0", REJECTED: "Rejected", DUPLICATE: "Marked Duplicate" };
@@ -569,9 +729,10 @@ export default function OfficerPage() {
 
   const handleRecomputePriorities = () => {
     setIsRecomputing(true);
+    fetchBackendData();
     setTimeout(() => {
       setIsRecomputing(false);
-      setRecomputeAlert("Dynamic Priority Engine: Evaluated 14 active incidents, recalculated SLA deadlines & consensus scores.");
+      setRecomputeAlert("Dynamic Priority Engine: Evaluated active incidents, recalculated SLA deadlines & consensus scores.");
       setTimeout(() => setRecomputeAlert(null), 4000);
     }, 600);
   };

@@ -1,6 +1,6 @@
 """
 WasteWise AI — Incidents & Reports Routers
-Implements duplicate report clustering and dynamic priority engine integration.
+Implements duplicate report clustering, dynamic priority engine integration, and PostgreSQL persistence.
 """
 
 import uuid
@@ -9,9 +9,15 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.db import get_db
-from app.core.security import TokenPayload, get_current_user, require_role
+from app.core.security import (
+    TokenPayload,
+    get_current_user,
+    get_optional_user,
+    require_role,
+)
 from app.models.entities import (
     Incident,
     IncidentStatus,
@@ -26,6 +32,7 @@ from app.schemas.all_schemas import (
 )
 from app.services.clustering_service import DuplicateClusteringService
 from app.services.priority_engine import DynamicPriorityEngine
+from app.ws.live_ws import ws_manager
 
 # ---------------------------------------------------------------------------
 # Reports Router
@@ -37,13 +44,14 @@ reports_router = APIRouter()
 async def create_report(
     payload: ReportCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: TokenPayload = Depends(get_current_user),
+    current_user: Optional[TokenPayload] = Depends(get_optional_user),
 ):
     """
-    Citizen submits a new waste report with images & GPS coordinates.
-    Runs spatial-temporal duplicate clustering:
+    Citizen submits a new waste report with AI analysis results & GPS coordinates.
+    Persists report and clustered/created incident directly in PostgreSQL / Supabase:
     - If a report exists within 100m in the last 24h, merges into 1 incident and increments consensus count.
-    - Recalculates dynamic priority P0-P4 immediately.
+    - Evaluates priority via AI severity score + Dynamic Priority Engine (SLA & sensitive zones).
+    - Commits transaction and broadcasts real-time event to Officer Command Center.
     """
     # 1. Cluster into existing incident or create a new one
     incident, is_merged = await DuplicateClusteringService.cluster_or_create_incident(
@@ -53,29 +61,138 @@ async def create_report(
         category_str=payload.category,
         description=payload.description,
         address_text=payload.address_text,
+        confidence=payload.confidence,
+        estimated_volume_m3=payload.estimated_volume_m3,
+        severity_score=payload.severity_score,
+        detected_tags=payload.detected_tags,
+        recommended_action=payload.recommended_action,
+        image_urls=payload.image_urls,
     )
 
-    # 2. Recalculate Dynamic Priority
+    # 2. Recalculate Dynamic Priority from AI severity & sensitive zones
     _, new_priority, _ = DynamicPriorityEngine.calculate_priority_score(incident)
     incident.priority = new_priority
     await db.flush()
 
-    # 3. Create Report Record
+    # 3. Create Report Record linked to the Incident
+    user_id = None
+    if current_user and current_user.sub:
+        try:
+            user_id = uuid.UUID(current_user.sub)
+        except (ValueError, TypeError):
+            user_id = None
+
     new_report = Report(
-        user_id=uuid.UUID(current_user.sub),
+        user_id=user_id,
         incident_id=incident.id,
         category=payload.category,
+        confidence=payload.confidence,
+        severity_score=payload.severity_score,
+        estimated_volume_m3=payload.estimated_volume_m3,
+        detected_tags=payload.detected_tags or [],
+        recommended_action=payload.recommended_action,
         description=payload.description,
-        image_urls=payload.image_urls,
+        image_urls=payload.image_urls or [],
         latitude=payload.latitude,
         longitude=payload.longitude,
         address_text=payload.address_text,
         status=IncidentStatus.REPORTED,
     )
     db.add(new_report)
-    await db.flush()
+    await db.commit()
+    await db.refresh(new_report)
+    await db.refresh(incident)
 
-    return new_report
+    # 4. Broadcast Real-time WebSocket event to Officer Command Center
+    try:
+        await ws_manager.broadcast_event(
+            event_type="NEW_INCIDENT_REPORTED",
+            data={
+                "incident_id": str(incident.id),
+                "report_id": str(new_report.id),
+                "title": incident.title,
+                "category": incident.category.value,
+                "priority": incident.priority.value,
+                "severity_score": incident.severity_score,
+                "latitude": incident.latitude,
+                "longitude": incident.longitude,
+                "address_text": incident.address_text,
+                "created_at": incident.created_at.isoformat(),
+            },
+        )
+    except Exception:
+        pass
+
+    # Populate priority for response
+    report_dict = {
+        "id": new_report.id,
+        "user_id": new_report.user_id,
+        "incident_id": new_report.incident_id,
+        "category": new_report.category,
+        "confidence": new_report.confidence,
+        "estimated_volume_m3": new_report.estimated_volume_m3,
+        "severity_score": new_report.severity_score,
+        "detected_tags": new_report.detected_tags,
+        "recommended_action": new_report.recommended_action,
+        "description": new_report.description,
+        "image_urls": new_report.image_urls,
+        "latitude": new_report.latitude,
+        "longitude": new_report.longitude,
+        "address_text": new_report.address_text,
+        "status": new_report.status,
+        "priority": incident.priority,
+        "created_at": new_report.created_at,
+    }
+    return ReportRead(**report_dict)
+
+
+@reports_router.get("", response_model=List[ReportRead])
+async def list_reports(
+    incident_id: Optional[uuid.UUID] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[TokenPayload] = Depends(get_optional_user),
+):
+    """
+    List citizen reports from PostgreSQL / Supabase.
+    Optionally filter by associated incident_id.
+    """
+    stmt = (
+        select(Report)
+        .options(selectinload(Report.incident))
+        .order_by(Report.created_at.desc())
+    )
+    if incident_id:
+        stmt = stmt.where(Report.incident_id == incident_id)
+    res = await db.execute(stmt)
+    reports = res.scalars().all()
+
+    # Attach incident priority to response
+    result_list = []
+    for r in reports:
+        prio = None
+        if r.incident:
+            prio = r.incident.priority
+        r_dict = {
+            "id": r.id,
+            "user_id": r.user_id,
+            "incident_id": r.incident_id,
+            "category": r.category,
+            "confidence": r.confidence,
+            "estimated_volume_m3": r.estimated_volume_m3,
+            "severity_score": r.severity_score,
+            "detected_tags": r.detected_tags,
+            "recommended_action": r.recommended_action,
+            "description": r.description,
+            "image_urls": r.image_urls,
+            "latitude": r.latitude,
+            "longitude": r.longitude,
+            "address_text": r.address_text,
+            "status": r.status,
+            "priority": prio,
+            "created_at": r.created_at,
+        }
+        result_list.append(ReportRead(**r_dict))
+    return result_list
 
 
 @reports_router.get("/my", response_model=List[ReportRead])
@@ -83,14 +200,41 @@ async def list_my_reports(
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
 ):
-    """List reports submitted by the currently authenticated citizen (IDOR-safe)."""
+    """List reports submitted by the currently authenticated citizen."""
     stmt = (
         select(Report)
+        .options(selectinload(Report.incident))
         .where(Report.user_id == uuid.UUID(current_user.sub))
         .order_by(Report.created_at.desc())
     )
     res = await db.execute(stmt)
-    return res.scalars().all()
+    reports = res.scalars().all()
+    result_list = []
+    for r in reports:
+        prio = None
+        if r.incident:
+            prio = r.incident.priority
+        r_dict = {
+            "id": r.id,
+            "user_id": r.user_id,
+            "incident_id": r.incident_id,
+            "category": r.category,
+            "confidence": r.confidence,
+            "estimated_volume_m3": r.estimated_volume_m3,
+            "severity_score": r.severity_score,
+            "detected_tags": r.detected_tags,
+            "recommended_action": r.recommended_action,
+            "description": r.description,
+            "image_urls": r.image_urls,
+            "latitude": r.latitude,
+            "longitude": r.longitude,
+            "address_text": r.address_text,
+            "status": r.status,
+            "priority": prio,
+            "created_at": r.created_at,
+        }
+        result_list.append(ReportRead(**r_dict))
+    return result_list
 
 
 # ---------------------------------------------------------------------------
@@ -104,9 +248,9 @@ async def list_incidents(
     priority: Optional[PriorityLevel] = None,
     status_filter: Optional[IncidentStatus] = None,
     db: AsyncSession = Depends(get_db),
-    current_user: TokenPayload = Depends(require_role("officer", "admin", "driver")),
+    current_user: Optional[TokenPayload] = Depends(get_optional_user),
 ):
-    """List operational incidents with priority & status filters."""
+    """List operational incidents from PostgreSQL with priority & status filters."""
     stmt = select(Incident).order_by(Incident.created_at.desc())
     if priority:
         stmt = stmt.where(Incident.priority == priority)
@@ -116,6 +260,23 @@ async def list_incidents(
     return res.scalars().all()
 
 
+@incidents_router.get("/{incident_id}", response_model=IncidentRead)
+async def get_incident(
+    incident_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[TokenPayload] = Depends(get_optional_user),
+):
+    """Fetch single incident details by ID."""
+    stmt = select(Incident).where(Incident.id == incident_id)
+    res = await db.execute(stmt)
+    inc = res.scalar_one_or_none()
+    if not inc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found"
+        )
+    return inc
+
+
 @incidents_router.patch("/{incident_id}", response_model=IncidentRead)
 async def update_incident(
     incident_id: uuid.UUID,
@@ -123,7 +284,7 @@ async def update_incident(
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(require_role("officer", "admin")),
 ):
-    """Officer updates incident priority, assignment, or status."""
+    """Officer updates incident priority, assignment, or status with PostgreSQL persistence."""
     stmt = select(Incident).where(Incident.id == incident_id)
     res = await db.execute(stmt)
     inc = res.scalar_one_or_none()
@@ -133,12 +294,40 @@ async def update_incident(
             status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found"
         )
 
+    if payload.title is not None:
+        inc.title = payload.title
+    if payload.description is not None:
+        inc.description = payload.description
     if payload.priority is not None:
         inc.priority = payload.priority
     if payload.status is not None:
         inc.status = payload.status
     if payload.assigned_vehicle_id is not None:
         inc.assigned_vehicle_id = payload.assigned_vehicle_id
+    if payload.estimated_volume_m3 is not None:
+        inc.estimated_volume_m3 = payload.estimated_volume_m3
+    if payload.severity_score is not None:
+        inc.severity_score = payload.severity_score
+    if payload.recommended_action is not None:
+        inc.recommended_action = payload.recommended_action
 
-    await db.flush()
+    await db.commit()
+    await db.refresh(inc)
+
+    # Broadcast status change to connected surfaces
+    try:
+        await ws_manager.broadcast_event(
+            event_type="INCIDENT_UPDATED",
+            data={
+                "incident_id": str(inc.id),
+                "status": inc.status.value,
+                "priority": inc.priority.value,
+                "assigned_vehicle_id": (
+                    str(inc.assigned_vehicle_id) if inc.assigned_vehicle_id else None
+                ),
+            },
+        )
+    except Exception:
+        pass
+
     return inc
