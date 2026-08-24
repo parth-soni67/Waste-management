@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import * as maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+import { AlertTriangle, RefreshCw } from "lucide-react";
 
 export interface DriverMapIncident {
   id: string;
@@ -24,6 +25,8 @@ interface DriverMapProps {
   activeIncidentId: string | null;
   onSelectIncident: (id: string) => void;
   routeGeometry: [number, number][];
+  routeError?: boolean;
+  onRetryRoute?: () => void;
 }
 
 const PRIORITY_COLORS: Record<string, string> = {
@@ -40,11 +43,14 @@ export default function DriverMap({
   activeIncidentId,
   onSelectIncident,
   routeGeometry,
+  routeError = false,
+  onRetryRoute,
 }: DriverMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const driverMarkerRef = useRef<maplibregl.Marker | null>(null);
   const incidentMarkersRef = useRef<maplibregl.Marker[]>([]);
+  const [mapLoaded, setMapLoaded] = useState(false);
 
   // 1. Initialize Map
   useEffect(() => {
@@ -54,7 +60,7 @@ export default function DriverMap({
       ? [driverLocation.lng, driverLocation.lat]
       : assignments.length > 0
       ? [assignments[0].longitude, assignments[0].latitude]
-      : [72.586, 23.033];
+      : [72.586, 23.033]; // Gandhinagar Default
 
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
@@ -68,6 +74,7 @@ export default function DriverMap({
 
     map.on("load", () => {
       mapRef.current = map;
+      setMapLoaded(true);
 
       // Add route source & layer
       map.addSource("driver-route", {
@@ -115,15 +122,24 @@ export default function DriverMap({
       });
     });
 
+    const resizeObserver = new ResizeObserver(() => {
+      map.resize();
+    });
+    if (mapContainerRef.current) {
+      resizeObserver.observe(mapContainerRef.current);
+    }
+
     return () => {
+      resizeObserver.disconnect();
       map.remove();
       mapRef.current = null;
+      setMapLoaded(false);
     };
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 2. Update Driver Marker
   useEffect(() => {
-    if (!mapRef.current || !driverLocation) return;
+    if (!mapRef.current || !driverLocation || !mapLoaded) return;
 
     if (!driverMarkerRef.current) {
       const el = document.createElement("div");
@@ -143,11 +159,11 @@ export default function DriverMap({
     } else {
       driverMarkerRef.current.setLngLat([driverLocation.lng, driverLocation.lat]);
     }
-  }, [driverLocation]);
+  }, [driverLocation, mapLoaded]);
 
   // 3. Update Incident Markers
   useEffect(() => {
-    if (!mapRef.current) return;
+    if (!mapRef.current || !mapLoaded) return;
 
     // Clear previous markers
     incidentMarkersRef.current.forEach((m) => m.remove());
@@ -205,11 +221,11 @@ export default function DriverMap({
 
       incidentMarkersRef.current.push(marker);
     });
-  }, [assignments, activeIncidentId, onSelectIncident]);
+  }, [assignments, activeIncidentId, onSelectIncident, mapLoaded]);
 
   // 4. Update Route Geometry on Map
   useEffect(() => {
-    if (!mapRef.current) return;
+    if (!mapRef.current || !mapLoaded) return;
     const map = mapRef.current;
 
     if (map.isStyleLoaded()) {
@@ -233,18 +249,38 @@ export default function DriverMap({
         map.fitBounds(bounds, { padding: 60, maxZoom: 16 });
       }
     }
-  }, [routeGeometry, driverLocation]);
+  }, [routeGeometry, driverLocation, mapLoaded]);
 
   return (
     <div className="relative w-full h-full min-h-[420px] rounded-2xl overflow-hidden shadow-inner border border-slate-200">
       <div ref={mapContainerRef} className="w-full h-full min-h-[420px]" />
-      
+
       {/* Map Overlay Badge */}
       <div className="absolute top-3 left-3 z-10 flex items-center gap-2 bg-white/90 backdrop-blur-md px-3 py-1.5 rounded-xl border border-slate-200/80 shadow-sm text-xs font-bold text-slate-800">
         <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
         <span>Live Navigation Map</span>
-        <span className="text-[10px] font-normal text-slate-500">({assignments.length} Stops)</span>
+        <span className="text-[10px] font-normal text-slate-500">
+          ({assignments.length} {assignments.length === 1 ? "Stop" : "Stops"})
+        </span>
       </div>
+
+      {/* Route Error Banner */}
+      {routeError && assignments.length > 0 && (
+        <div className="absolute bottom-4 left-4 right-4 z-10 flex items-center justify-between bg-amber-900/90 text-amber-100 backdrop-blur-md px-4 py-2.5 rounded-2xl border border-amber-700 shadow-lg text-xs font-semibold">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+            <span>Route calculation temporarily unavailable. Using direct bearing.</span>
+          </div>
+          {onRetryRoute && (
+            <button
+              onClick={onRetryRoute}
+              className="px-2.5 py-1 rounded-lg bg-amber-800 hover:bg-amber-700 text-white text-[11px] font-bold transition-colors inline-flex items-center gap-1.5 cursor-pointer shrink-0"
+            >
+              <RefreshCw className="w-3 h-3" /> Retry Route
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

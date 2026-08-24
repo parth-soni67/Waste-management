@@ -464,7 +464,17 @@ export default function OfficerPage() {
       ws.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data);
-          if (msg.type === "NEW_INCIDENT_REPORTED" || msg.type === "INCIDENT_UPDATED" || msg.type === "LOOP_C_DYNAMIC_REROUTE") {
+          if (
+            msg.type === "NEW_INCIDENT_REPORTED" ||
+            msg.type === "INCIDENT_UPDATED" ||
+            msg.type === "LOOP_C_DYNAMIC_REROUTE" ||
+            msg.type === "INCIDENT_ASSIGNED" ||
+            msg.type === "COLLECTION_STARTED" ||
+            msg.type === "COLLECTION_PROOF_UPLOADED" ||
+            msg.type === "INCIDENT_PROOF_SUBMITTED" ||
+            msg.type === "INCIDENT_COLLECTED" ||
+            msg.type === "REPORT_CREATED"
+          ) {
             void fetchBackendData();
           }
         } catch {}

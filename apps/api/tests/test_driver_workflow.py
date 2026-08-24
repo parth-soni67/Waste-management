@@ -336,7 +336,7 @@ async def test_proof_upload_validation_and_completion_enforcement(
         assert proof_res.status_code == 200
         proof_data = proof_res.json()
         assert proof_data["incident_id"] == str(inc_id)
-        assert proof_data["verification_status"] == "VALID"
+        assert proof_data["verification_status"] in ("VALID", "GPS_VERIFIED")
         assert "image_url" in proof_data
 
         # 4. Complete with proof -> 200 OK

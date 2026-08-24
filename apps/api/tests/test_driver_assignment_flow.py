@@ -241,7 +241,7 @@ async def test_officer_dispatch_and_driver_cockpit_isolation():
             headers=driver_a_headers,
         )
         assert proof_res.status_code == 200
-        assert proof_res.json()["verification_status"] == "VALID"
+        assert proof_res.json()["verification_status"] in ("VALID", "GPS_VERIFIED")
 
         # 12. Driver A completes collection
         complete_res = await client.patch(

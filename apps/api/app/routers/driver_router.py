@@ -309,9 +309,9 @@ async def start_collection(
     driver_vehicles = veh_res.scalars().all()
     driver_vehicle_ids = {v.id for v in driver_vehicles}
 
-    is_authorized = (
-        incident.assigned_driver_id == driver_uuid
-        or (incident.assigned_vehicle_id is not None and incident.assigned_vehicle_id in driver_vehicle_ids)
+    is_authorized = incident.assigned_driver_id == driver_uuid or (
+        incident.assigned_vehicle_id is not None
+        and incident.assigned_vehicle_id in driver_vehicle_ids
     )
     if not is_authorized:
         raise HTTPException(
@@ -407,6 +407,28 @@ async def upload_collection_proof(
         mime_type=detected_mime,
     )
 
+    # GPS Distance Verification
+    ver_status = "VALID"
+    distance_meters = None
+    if latitude is not None and longitude is not None:
+        import math
+
+        R = 6371000.0  # Earth radius in meters
+        phi1 = math.radians(latitude)
+        phi2 = math.radians(incident.latitude)
+        delta_phi = math.radians(incident.latitude - latitude)
+        delta_lambda = math.radians(incident.longitude - longitude)
+        a = math.sin(delta_phi / 2.0) ** 2 + math.cos(phi1) * math.cos(phi2) * (
+            math.sin(delta_lambda / 2.0) ** 2
+        )
+        c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
+        distance_meters = round(R * c, 1)
+
+        if distance_meters <= 250.0:
+            ver_status = "GPS_VERIFIED"
+        else:
+            ver_status = "GPS_MISMATCH"
+
     proof = CollectionProof(
         incident_id=incident_id,
         driver_id=driver_uuid,
@@ -418,7 +440,7 @@ async def upload_collection_proof(
         captured_at=datetime.now(timezone.utc),
         uploaded_at=datetime.now(timezone.utc),
         notes=notes,
-        verification_status="VALID",
+        verification_status=ver_status,
     )
     db.add(proof)
     incident.updated_at = datetime.now(timezone.utc)
@@ -426,20 +448,26 @@ async def upload_collection_proof(
     await db.commit()
     await db.refresh(proof)
 
-    # Broadcast event
+    # Broadcast event to driver and officer dashboards
+    proof_event_payload = {
+        "incident_id": str(incident_id),
+        "incident_code": f"WW-{str(incident_id)[:8].upper()}",
+        "proof_id": str(proof.id),
+        "driver_id": str(driver_uuid),
+        "image_url": proof.image_url,
+        "latitude": proof.latitude,
+        "longitude": proof.longitude,
+        "distance_meters": distance_meters,
+        "uploaded_at": proof.uploaded_at.isoformat(),
+        "verification_status": proof.verification_status,
+    }
     await ws_manager.broadcast_event(
         "COLLECTION_PROOF_UPLOADED",
-        {
-            "incident_id": str(incident_id),
-            "incident_code": f"WW-{str(incident_id)[:8].upper()}",
-            "proof_id": str(proof.id),
-            "driver_id": str(driver_uuid),
-            "image_url": proof.image_url,
-            "latitude": proof.latitude,
-            "longitude": proof.longitude,
-            "uploaded_at": proof.uploaded_at.isoformat(),
-            "verification_status": proof.verification_status,
-        },
+        proof_event_payload,
+    )
+    await ws_manager.broadcast_event(
+        "INCIDENT_PROOF_SUBMITTED",
+        proof_event_payload,
     )
 
     return proof
