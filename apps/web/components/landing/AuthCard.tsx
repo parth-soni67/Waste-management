@@ -131,7 +131,7 @@ export default function AuthCard() {
               color: "var(--color-primary-strong)",
             }}
           >
-            SIH 2026
+            v1.0 Live
           </span>
         </div>
 

@@ -36,7 +36,7 @@ export default function LandingHero() {
         }}
       >
         <Sparkles className="w-3.5 h-3.5 text-[var(--color-primary)]" />
-        <span>Smart India Hackathon 2026 · PS 8</span>
+        <span>AI-Powered Municipal Waste Platform</span>
       </motion.div>
 
       {/* Kinetic Headline */}
