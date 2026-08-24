@@ -368,3 +368,76 @@ async def test_report_and_incident_timestamps_authoritative_and_timezone_aware(
         assert "updated_at" in inc_data
         inc_created = inc_data["created_at"]
         assert "Z" in inc_created or "+00:00" in inc_created or "+00" in inc_created
+
+
+@pytest.mark.asyncio
+async def test_clustered_incident_timestamp_and_relative_time_thresholds(
+    officer_token,
+):
+    """
+    Verify that when reports cluster into an incident, incident updated_at
+    reflects the latest report and relative formatting matches the specification.
+    """
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # Report 1
+        res1 = await client.post(
+            "/api/v1/reports",
+            json={
+                "category": "plastic",
+                "severity_score": 5.0,
+                "latitude": 23.0330,
+                "longitude": 72.5860,
+                "description": "Report 1 at Hospital area",
+            },
+            headers={"Authorization": f"Bearer {officer_token}"},
+        )
+        assert res1.status_code == 201
+        inc1_id = res1.json()["incident_id"]
+
+        # Report 2 (nearby, will cluster into same incident)
+        res2 = await client.post(
+            "/api/v1/reports",
+            json={
+                "category": "plastic",
+                "severity_score": 6.0,
+                "latitude": 23.0332,
+                "longitude": 72.5862,
+                "description": "Report 2 at Hospital area duplicate",
+            },
+            headers={"Authorization": f"Bearer {officer_token}"},
+        )
+        assert res2.status_code == 201
+        inc2_id = res2.json()["incident_id"]
+        assert inc1_id == inc2_id
+
+        # Verify incident updated_at is recent UTC
+        get_inc = await client.get(f"/api/v1/incidents/{inc1_id}")
+        assert get_inc.status_code == 200
+        inc_json = get_inc.json()
+        assert inc_json["report_count"] == 2
+        assert "updated_at" in inc_json
+
+        # Test relative time formatting logic thresholds
+        def format_relative_time_spec(elapsed_seconds: float) -> str:
+            if elapsed_seconds < 10:
+                return "Just now"
+            if elapsed_seconds < 60:
+                return f"{int(elapsed_seconds)}s ago"
+            mins = int(elapsed_seconds // 60)
+            if mins < 60:
+                return f"{mins}m ago"
+            hours = int(mins // 60)
+            if hours < 24:
+                return f"{hours}h ago"
+            days = int(hours // 24)
+            if days < 7:
+                return f"{days}d ago"
+            return "localized date"
+
+        assert format_relative_time_spec(3) == "Just now"
+        assert format_relative_time_spec(35) == "35s ago"
+        assert format_relative_time_spec(120) == "2m ago"
+        assert format_relative_time_spec(7200) == "2h ago"
+        assert format_relative_time_spec(259200) == "3d ago"

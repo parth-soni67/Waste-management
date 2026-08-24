@@ -51,13 +51,12 @@ export function getElapsedMinutes(
 
 /**
  * Formats a timestamp into human-readable relative time string:
- * - 0–59 seconds: "Just now"
- * - 1 minute: "1 min ago"
- * - 2–59 minutes: "X min ago"
- * - 1 hour: "1 hour ago"
- * - 2–23 hours: "X hours ago"
- * - 1 day: "1 day ago"
- * - 2+ days: "X days ago"
+ * - < 10 seconds: "Just now"
+ * - 10s - 59s: "35s ago"
+ * - 1m - 59m: "12m ago"
+ * - 1h - 23h: "2h ago"
+ * - 1d - 6d: "3d ago"
+ * - Older: localized date
  */
 export function formatRelativeTime(
   timestamp: string | number | Date | null | undefined
@@ -67,19 +66,29 @@ export function formatRelativeTime(
   const diffMs = getElapsedMs(timestamp);
   const diffSec = Math.floor(diffMs / 1000);
 
-  if (diffSec < 60) {
+  if (diffSec < 10) {
     return "Just now";
   }
 
+  if (diffSec < 60) {
+    return `${diffSec}s ago`;
+  }
+
   const diffMin = Math.floor(diffSec / 60);
-  if (diffMin === 1) return "1 min ago";
-  if (diffMin < 60) return `${diffMin} min ago`;
+  if (diffMin < 60) {
+    return `${diffMin}m ago`;
+  }
 
   const diffHours = Math.floor(diffMin / 60);
-  if (diffHours === 1) return "1 hour ago";
-  if (diffHours < 24) return `${diffHours} hours ago`;
+  if (diffHours < 24) {
+    return `${diffHours}h ago`;
+  }
 
   const diffDays = Math.floor(diffHours / 24);
-  if (diffDays === 1) return "1 day ago";
-  return `${diffDays} days ago`;
+  if (diffDays < 7) {
+    return `${diffDays}d ago`;
+  }
+
+  const date = parseUtcDate(timestamp);
+  return date.toLocaleDateString();
 }

@@ -73,6 +73,7 @@ interface IncidentItem {
   reportsCount: number;
   timeAgo: string;
   createdAt: string;
+  latestReportAt: string;
   slaMinutesLeft: number;
   assignedTruck?: string;
   sensitiveLocation?: string;
@@ -90,6 +91,7 @@ interface BackendIncidentItem {
   address_text?: string;
   assigned_vehicle_id?: string;
   created_at?: string;
+  updated_at?: string;
 }
 
 interface BackendReportItem {
@@ -349,8 +351,9 @@ export default function OfficerPage() {
           const mappedIncidents: IncidentItem[] = data.map((inc: BackendIncidentItem) => {
             const isP0 = inc.priority === "P0";
             const createdAtStr = inc.created_at || new Date().toISOString();
+            const latestReportAtStr = inc.updated_at || inc.created_at || new Date().toISOString();
             const elapsedMins = getElapsedMinutes(createdAtStr);
-            const timeAgoStr = formatRelativeTime(createdAtStr);
+            const timeAgoStr = formatRelativeTime(latestReportAtStr);
             const slaLeft = isP0 ? Math.max(10, 45 - elapsedMins) : inc.priority === "P1" ? Math.max(20, 120 - elapsedMins) : Math.max(60, 240 - elapsedMins);
 
             return {
@@ -364,6 +367,7 @@ export default function OfficerPage() {
               reportsCount: inc.report_count || 1,
               timeAgo: timeAgoStr,
               createdAt: createdAtStr,
+              latestReportAt: latestReportAtStr,
               slaMinutesLeft: slaLeft,
               sensitiveLocation: isP0 ? "Hospital Buffer Zone (<200m)" : inc.address_text || undefined,
               assignedTruck: inc.assigned_vehicle_id ? "GJ-01-WM-4402 (Assigned)" : undefined,
@@ -490,8 +494,8 @@ export default function OfficerPage() {
       return true;
     })
     .sort((a, b) => {
-      const timeA = parseUtcDate(a.createdAt).getTime();
-      const timeB = parseUtcDate(b.createdAt).getTime();
+      const timeA = parseUtcDate(a.latestReportAt || a.createdAt).getTime();
+      const timeB = parseUtcDate(b.latestReportAt || b.createdAt).getTime();
       return filterTime === "LATEST" ? timeB - timeA : timeA - timeB;
     });
 
@@ -609,6 +613,7 @@ export default function OfficerPage() {
         reportsCount: 6,
         timeAgo: "Just now",
         createdAt: new Date().toISOString(),
+        latestReportAt: new Date().toISOString(),
         slaMinutesLeft: 30,
         sensitiveLocation: "Hospital Red Zone",
         assignedTruck: "GJ-01-WM-4402 (PREEMPTED STOP 1)",
@@ -1201,7 +1206,7 @@ export default function OfficerPage() {
                       </span>
                       <span className="font-mono text-xs font-bold text-slate-800">{inc.id}</span>
                     </div>
-                    <span className="text-[11px] font-semibold text-slate-400">{formatRelativeTime(inc.createdAt)}</span>
+                    <span className="text-[11px] font-semibold text-slate-400">{formatRelativeTime(inc.latestReportAt || inc.createdAt)}</span>
                   </div>
 
                   <h3 className="text-xs font-bold text-slate-900 line-clamp-1 mb-1">{inc.title}</h3>
@@ -1574,7 +1579,7 @@ export default function OfficerPage() {
                   title: `P0 Emergency: ${p0.title}`,
                   message: `${p0.category} waste in sensitive zone (${p0.sensitiveLocation || "Hospital buffer zone"}).`,
                   action: "View & Dispatch",
-                  time: formatRelativeTime(p0.createdAt),
+                  time: formatRelativeTime(p0.latestReportAt || p0.createdAt),
                 });
               }
               const p1s = incidents.filter((i) => i.priority === "P1");
@@ -1584,7 +1589,7 @@ export default function OfficerPage() {
                   title: `High Priority: ${p1.title}`,
                   message: `Accumulation severity: ${p1.slaMinutesLeft}m SLA remaining. Immediate truck dispatch recommended.`,
                   action: "Assign Truck",
-                  time: formatRelativeTime(p1.createdAt),
+                  time: formatRelativeTime(p1.latestReportAt || p1.createdAt),
                 });
               }
               if (alerts.length === 0) {

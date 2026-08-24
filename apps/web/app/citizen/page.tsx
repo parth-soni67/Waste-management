@@ -410,7 +410,7 @@ export default function CitizenPage() {
           severityScore: persistedData.severity_score,
           confidence: persistedData.confidence,
           volumeM3: persistedData.estimated_volume_m3,
-          createdAt: "Just now",
+          createdAt: persistedData.created_at || new Date().toISOString(),
           imageCount: finalImageUrls.length > 0 ? finalImageUrls.length : images.length,
         };
 
@@ -458,7 +458,7 @@ export default function CitizenPage() {
         status: "REPORTED",
         priority: aiAnalysis?.severityScore && aiAnalysis.severityScore > 7.0 ? "P1" : "P2",
         severityScore: aiAnalysis?.severityScore || 5.0,
-        createdAt: "Just now",
+        createdAt: new Date().toISOString(),
         imageCount: images.length,
       };
 
