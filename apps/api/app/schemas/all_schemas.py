@@ -242,3 +242,9 @@ class WasteAnalysisResult(BaseModel):
     is_fallback: bool = Field(
         default=False, description="True if computed via heuristic fallback engine"
     )
+    image_url: Optional[str] = Field(
+        default=None, description="Persisted Supabase Storage public URL"
+    )
+    storage_path: Optional[str] = Field(
+        default=None, description="Persisted Supabase Storage object path"
+    )

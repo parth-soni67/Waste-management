@@ -66,12 +66,15 @@ interface CVAnalysis {
   tags: string[];
   recommendedAction: string;
   isFallback: boolean;
+  imageUrl?: string;
+  storagePath?: string;
 }
 
 export default function CitizenPage() {
   const { user, logout, getAuthHeaders } = useAuth();
   const [activeTab, setActiveTab] = useState<"report" | "history">("report");
   const [images, setImages] = useState<string[]>([]);
+  const [uploadedImageUrls, setUploadedImageUrls] = useState<string[]>([]);
   const [category, setCategory] = useState("mixed");
   const [description, setDescription] = useState("");
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>({
@@ -203,7 +206,12 @@ export default function CitizenPage() {
           tags: Array.isArray(data.detected_tags) ? data.detected_tags : [],
           recommendedAction: data.recommended_action || "Deploy municipal collection vehicle",
           isFallback: Boolean(data.is_fallback),
+          imageUrl: data.image_url,
+          storagePath: data.storage_path,
         });
+        if (data.image_url) {
+          setUploadedImageUrls((prev) => [...prev, data.image_url]);
+        }
       } else {
         console.warn("Backend AI returned non-200 status, engaging heuristic fallback", res.status);
         executeClientFallback(hintCat);
@@ -265,6 +273,7 @@ export default function CitizenPage() {
       if (updated.length === 0) setAiAnalysis(null);
       return updated;
     });
+    setUploadedImageUrls((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleGetLocation = () => {
@@ -331,6 +340,13 @@ export default function CitizenPage() {
     e.preventDefault();
     setSubmitting(true);
 
+    const finalImageUrls: string[] = [];
+    if (uploadedImageUrls.length > 0) {
+      finalImageUrls.push(...uploadedImageUrls);
+    } else if (aiAnalysis?.imageUrl) {
+      finalImageUrls.push(aiAnalysis.imageUrl);
+    }
+
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
     const reportPayload = {
       category: (aiAnalysis?.category || category).toLowerCase().replace(/\s+/g, '_').split('/')[0].trim(),
@@ -340,7 +356,7 @@ export default function CitizenPage() {
       detected_tags: aiAnalysis?.tags || [],
       recommended_action: aiAnalysis?.recommendedAction || "Deploy municipal collection vehicle",
       description: description || "Citizen reported waste accumulation.",
-      image_urls: [], // safe, avoid base64 bloat in DB
+      image_urls: finalImageUrls,
       latitude: coords?.lat ?? 23.0330,
       longitude: coords?.lng ?? 72.5860,
       address_text: address,
@@ -375,7 +391,7 @@ export default function CitizenPage() {
           confidence: persistedData.confidence,
           volumeM3: persistedData.estimated_volume_m3,
           createdAt: "Just now",
-          imageCount: images.length,
+          imageCount: finalImageUrls.length > 0 ? finalImageUrls.length : images.length,
         };
 
         // Broadcast to LocalStorage for offline fallback support
@@ -402,6 +418,7 @@ export default function CitizenPage() {
         setReportsList((prev) => [newReport, ...prev]);
         setSubmittedReport(newReport);
         setImages([]);
+        setUploadedImageUrls([]);
         setDescription("");
         setAiAnalysis(null);
       } else {

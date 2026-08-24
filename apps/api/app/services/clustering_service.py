@@ -128,7 +128,9 @@ class DuplicateClusteringService:
 
             if image_urls:
                 existing_imgs = list(closest_incident.image_urls or [])
-                existing_imgs.extend(image_urls)
+                for img in image_urls:
+                    if img and img not in existing_imgs:
+                        existing_imgs.append(img)
                 closest_incident.image_urls = existing_imgs[:10]
 
             await db.flush()

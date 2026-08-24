@@ -388,7 +388,7 @@ export default function OfficerPage() {
             description: r.description || "Reported municipal waste accumulation.",
             address: r.address_text || `GPS: ${r.latitude?.toFixed(4) || "23.0330"}°N, ${r.longitude?.toFixed(4) || "72.5860"}°E`,
             category: (r.category || "Mixed").toUpperCase(),
-            photos: Array.isArray(r.image_urls) && r.image_urls.length > 0 ? r.image_urls : ["/demo-report-1.jpg"],
+            photos: Array.isArray(r.image_urls) ? r.image_urls : [],
             submittedAt: r.created_at ? new Date(r.created_at).toLocaleString() : "Just now",
             aiCategory: (r.category || "Mixed").toUpperCase(),
             aiConfidence: Number(r.confidence ?? 0.92),
@@ -1948,20 +1948,28 @@ export default function OfficerPage() {
                   <ImageIcon className="w-3.5 h-3.5 text-slate-500" />
                   Photo Evidence ({selectedReportDetail.photos.length})
                 </h3>
-                <div className="grid grid-cols-1 gap-3">
-                  {selectedReportDetail.photos.map((photo, i) => (
-                    <div key={i} className="relative rounded-xl overflow-hidden border border-slate-200 shadow-sm">
-                      <img
-                        src={photo}
-                        alt={`Report photo ${i + 1}`}
-                        className="w-full h-56 object-cover"
-                      />
-                      <div className="absolute bottom-2 left-2 px-2 py-0.5 rounded bg-black/60 text-white text-[10px] font-bold">
-                        Photo {i + 1} of {selectedReportDetail.photos.length}
+                {selectedReportDetail.photos.length > 0 ? (
+                  <div className="grid grid-cols-1 gap-3">
+                    {selectedReportDetail.photos.map((photo, i) => (
+                      <div key={`${selectedReportDetail.reportId}-photo-${i}`} className="relative rounded-xl overflow-hidden border border-slate-200 shadow-sm bg-slate-100">
+                        <img
+                          src={photo}
+                          alt={`Report ${selectedReportDetail.reportId} photo ${i + 1}`}
+                          className="w-full h-56 object-cover"
+                        />
+                        <div className="absolute bottom-2 left-2 px-2 py-0.5 rounded bg-black/60 text-white text-[10px] font-bold">
+                          Photo {i + 1} of {selectedReportDetail.photos.length}
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="p-6 rounded-xl border border-dashed border-slate-200 text-center text-slate-400 bg-slate-50">
+                    <ImageIcon className="w-6 h-6 mx-auto mb-1.5 text-slate-300" />
+                    <p className="text-xs font-semibold text-slate-600">No photo evidence uploaded</p>
+                    <p className="text-[10px] text-slate-400">Citizen submitted coordinate / descriptive report without attachments</p>
+                  </div>
+                )}
               </div>
 
               {/* Reporter Information */}

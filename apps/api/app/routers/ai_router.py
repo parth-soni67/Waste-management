@@ -16,6 +16,7 @@ from app.core.db import get_db
 from app.core.security import TokenPayload, get_optional_user, require_role
 from app.schemas.all_schemas import WasteAnalysisResult
 from app.services.priority_engine import DynamicPriorityEngine
+from app.services.storage_service import StorageService
 
 router = APIRouter()
 
@@ -54,6 +55,8 @@ async def analyze_waste_image(
         image_url=payload.image_url,
         hint_category=payload.hint_category,
     )
+    if payload.image_url:
+        result.image_url = payload.image_url
     return result
 
 
@@ -65,7 +68,7 @@ async def analyze_waste_image_file(
 ):
     """
     Analyze directly uploaded image file with MIME sniffing and size validation per security_guide.md §3.
-    Supports JPEG, PNG, and WEBP images.
+    Uploads real image to Supabase Storage and returns storage URL alongside AI vision inferences.
     """
     contents = await file.read()
     if not contents:
@@ -92,12 +95,53 @@ async def analyze_waste_image_file(
                 detail="Unsupported image format. Allowed formats: JPEG, PNG, WEBP",
             )
 
+    # 1. Upload genuine image to Supabase Storage
+    storage_res = await StorageService.upload_report_image(
+        contents=contents,
+        mime_type=mime_type,
+        filename_hint=file.filename,
+    )
+
+    # 2. Run Gemini Vision AI on the actual uploaded bytes
     result = await ComputerVisionService.analyze_image(
         image_data=contents,
         mime_type=mime_type,
         hint_category=hint_category,
     )
+
+    # 3. Attach exact persisted Supabase Storage reference
+    result.image_url = storage_res["public_url"]
+    result.storage_path = storage_res["storage_path"]
     return result
+
+
+@router.post("/upload-image")
+async def upload_raw_image(
+    file: UploadFile = File(...),
+    current_user: Optional[TokenPayload] = Depends(get_optional_user),
+):
+    """
+    Upload an image directly to Supabase Storage and return its public URL.
+    """
+    contents = await file.read()
+    if not contents:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Uploaded file is empty",
+        )
+    max_bytes = settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024
+    if len(contents) > max_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"File size exceeds {settings.MAX_UPLOAD_SIZE_MB}MB limit",
+        )
+    mime_type = detect_image_mime_type(contents) or file.content_type or "image/jpeg"
+    storage_res = await StorageService.upload_report_image(
+        contents=contents,
+        mime_type=mime_type,
+        filename_hint=file.filename,
+    )
+    return storage_res
 
 
 @router.get("/hotspots", response_model=List[HotspotPrediction])
