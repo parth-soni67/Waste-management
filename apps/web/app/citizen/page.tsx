@@ -90,39 +90,24 @@ export default function CitizenPage() {
   const [submittedReport, setSubmittedReport] = useState<CitizenReport | null>(null);
   const [resolutionFeedback, setResolutionFeedback] = useState<Record<string, { response: string; count: number }>>({});
 
-  // Mock list of initial citizen reports for testing
-  const [reportsList, setReportsList] = useState<CitizenReport[]>([
-    {
-      id: "REP-9482",
-      category: "Mixed Municipal Waste",
-      description: "Overflowing community bin spreading near market square.",
-      address: "Sector 11 Market, Gandhinagar",
-      status: "COLLECTED",
-      priority: "P1",
-      createdAt: "2 hours ago",
-      imageCount: 2,
-    },
-    {
-      id: "REP-9380",
-      category: "Organic / Food Waste",
-      description: "Decomposing vegetable waste at Sector 21 wholesale market.",
-      address: "APMC Yard, Sector 21",
-      status: "COLLECTING",
-      priority: "P0",
-      createdAt: "3 hours ago",
-      imageCount: 3,
-    },
-    {
-      id: "REP-9104",
-      category: "Plastic & Packaging",
-      description: "Discarded plastic packaging pile behind bus terminal.",
-      address: "Central Bus Depot, Zone 2",
-      status: "VERIFIED",
-      priority: "P3",
-      createdAt: "Yesterday",
-      imageCount: 1,
-    },
-  ]);
+  // Real citizen reports list (isolated per authenticated user from backend)
+  const [reportsList, setReportsList] = useState<CitizenReport[]>([]);
+
+  const formatRelativeTime = (dateString?: string): string => {
+    if (!dateString) return "Just now";
+    const date = new Date(dateString);
+    const now = Date.now();
+    const elapsedMs = Math.max(0, now - date.getTime());
+    const elapsedSecs = Math.floor(elapsedMs / 1000);
+    const elapsedMins = Math.floor(elapsedSecs / 60);
+    const elapsedHours = Math.floor(elapsedMins / 60);
+    const elapsedDays = Math.floor(elapsedHours / 24);
+
+    if (elapsedSecs < 45) return "Just now";
+    if (elapsedMins < 60) return `${elapsedMins}m ago`;
+    if (elapsedHours < 24) return `${elapsedHours}h ago`;
+    return `${elapsedDays}d ago`;
+  };
 
   // --- Live Camera & File Upload Logic ---
   const [isCameraActive, setIsCameraActive] = useState(false);
@@ -320,7 +305,7 @@ export default function CitizenPage() {
               severityScore: r.severity_score,
               confidence: r.confidence,
               volumeM3: r.estimated_volume_m3,
-              createdAt: r.created_at ? new Date(r.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "Just now",
+              createdAt: formatRelativeTime(r.created_at),
               imageCount: Array.isArray(r.image_urls) ? r.image_urls.length : 0,
             }));
             setReportsList(mapped);

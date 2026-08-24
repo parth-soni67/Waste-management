@@ -153,8 +153,9 @@ async def list_reports(
     current_user: Optional[TokenPayload] = Depends(get_optional_user),
 ):
     """
-    List citizen reports from PostgreSQL / Supabase.
-    Optionally filter by associated incident_id.
+    List reports with strict database-level authorization.
+    - Officers, Admins, and Drivers: view all municipal reports.
+    - Citizens: view ONLY their own reports (WHERE reports.user_id = current_user.id).
     """
     stmt = (
         select(Report)
@@ -163,6 +164,15 @@ async def list_reports(
     )
     if incident_id:
         stmt = stmt.where(Report.incident_id == incident_id)
+
+    # Server-side RBAC & Citizen isolation at database query level
+    if current_user and current_user.role == "citizen":
+        try:
+            user_uuid = uuid.UUID(current_user.sub)
+            stmt = stmt.where(Report.user_id == user_uuid)
+        except (ValueError, TypeError):
+            return []
+
     res = await db.execute(stmt)
     reports = res.scalars().all()
 
@@ -237,6 +247,67 @@ async def list_my_reports(
     return result_list
 
 
+@reports_router.get("/{report_id}", response_model=ReportRead)
+async def get_report_by_id(
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    """
+    Get report details by report ID.
+    - Officers and Admins can view any municipal report.
+    - Citizens can view ONLY their own report (returns 404 for other citizens' reports).
+    """
+    stmt = (
+        select(Report)
+        .options(selectinload(Report.incident))
+        .where(Report.id == report_id)
+    )
+    res = await db.execute(stmt)
+    report = res.scalar_one_or_none()
+    if not report:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Report not found",
+        )
+
+    if current_user.role == "citizen":
+        try:
+            user_uuid = uuid.UUID(current_user.sub)
+            if report.user_id != user_uuid:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Report not found",
+                )
+        except (ValueError, TypeError):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Report not found",
+            )
+
+    prio = report.incident.priority if report.incident else None
+    r_dict = {
+        "id": report.id,
+        "user_id": report.user_id,
+        "incident_id": report.incident_id,
+        "category": report.category,
+        "confidence": report.confidence,
+        "estimated_volume_m3": report.estimated_volume_m3,
+        "severity_score": report.severity_score,
+        "detected_tags": report.detected_tags,
+        "recommended_action": report.recommended_action,
+        "description": report.description,
+        "image_urls": report.image_urls,
+        "latitude": report.latitude,
+        "longitude": report.longitude,
+        "address_text": report.address_text,
+        "status": report.status,
+        "priority": prio,
+        "created_at": report.created_at,
+    }
+    return ReportRead(**r_dict)
+
+
 # ---------------------------------------------------------------------------
 # Incidents Router
 # ---------------------------------------------------------------------------
@@ -250,12 +321,28 @@ async def list_incidents(
     db: AsyncSession = Depends(get_db),
     current_user: Optional[TokenPayload] = Depends(get_optional_user),
 ):
-    """List operational incidents from PostgreSQL with priority & status filters."""
+    """
+    List operational incidents from PostgreSQL.
+    - Officers, Admins, and Drivers: view all active municipal incidents.
+    - Citizens: view incidents associated with their own submitted reports.
+    """
     stmt = select(Incident).order_by(Incident.created_at.desc())
     if priority:
         stmt = stmt.where(Incident.priority == priority)
     if status_filter:
         stmt = stmt.where(Incident.status == status_filter)
+
+    if current_user and current_user.role == "citizen":
+        try:
+            user_uuid = uuid.UUID(current_user.sub)
+            stmt = (
+                stmt.join(Report, Report.incident_id == Incident.id)
+                .where(Report.user_id == user_uuid)
+                .distinct()
+            )
+        except (ValueError, TypeError):
+            return []
+
     res = await db.execute(stmt)
     return res.scalars().all()
 
@@ -266,14 +353,40 @@ async def get_incident(
     db: AsyncSession = Depends(get_db),
     current_user: Optional[TokenPayload] = Depends(get_optional_user),
 ):
-    """Fetch single incident details by ID."""
-    stmt = select(Incident).where(Incident.id == incident_id)
+    """
+    Fetch single incident details by ID.
+    - Officers and Admins can view any municipal incident.
+    - Citizens can view ONLY incidents containing at least one of their own reports.
+    """
+    stmt = (
+        select(Incident)
+        .options(selectinload(Incident.reports))
+        .where(Incident.id == incident_id)
+    )
     res = await db.execute(stmt)
     inc = res.scalar_one_or_none()
     if not inc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found"
         )
+
+    if current_user and current_user.role == "citizen":
+        try:
+            user_uuid = uuid.UUID(current_user.sub)
+            user_report_exists = any(
+                r.user_id == user_uuid for r in (inc.reports or [])
+            )
+            if not user_report_exists:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Incident not found",
+                )
+        except (ValueError, TypeError):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Incident not found",
+            )
+
     return inc
 
 
