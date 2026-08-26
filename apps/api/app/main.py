@@ -36,6 +36,7 @@ from app.routers.incidents import (
     incidents_router,
     reports_router,
 )
+from app.routers.notifications_router import router as notifications_router
 from app.routers.optimization_router import router as optimization_router
 from app.routers.vehicles import router as vehicles_router
 from app.routers.verification_router import router as verification_router
@@ -149,6 +150,9 @@ app.include_router(
 )
 app.include_router(
     verification_router, prefix="/api/v1/verification", tags=["verification"]
+)
+app.include_router(
+    notifications_router, prefix="/api/v1", tags=["notifications"]
 )
 app.include_router(agent_router, prefix="/api/v1/agent", tags=["agent"])
 app.include_router(analytics_router, prefix="/api/v1/analytics", tags=["analytics"])

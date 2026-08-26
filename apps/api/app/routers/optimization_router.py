@@ -3,8 +3,11 @@ WasteWise AI — Optimization & Dispatch Router
 Endpoints for Vehicle Assignment Engine, Dynamic Route Optimization, Loop C triggers, and WebSockets.
 """
 
+import logging
 import uuid
 from typing import Any, Dict, List
+
+logger = logging.getLogger(__name__)
 
 from fastapi import (
     APIRouter,
@@ -21,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_db
 from app.core.security import TokenPayload, require_role
 from app.models.entities import Incident
+from app.services.notification_service import NotificationService
 from app.services.predictive_planning_service import (
     PredictivePlanningService,
     ProactiveDispatchPlan,
@@ -145,6 +149,25 @@ async def simulate_p0_emergency(
             "recalculated_route": recalculated.model_dump(),
         },
     )
+
+    # Persist and notify active Drivers of route update
+    try:
+        from app.models.entities import User, UserRole
+        driver_stmt = select(User.id).where(User.role == UserRole.DRIVER, User.is_active.is_(True))
+        driver_res = await db.execute(driver_stmt)
+        driver_ids = driver_res.scalars().all()
+        for d_id in driver_ids:
+            await NotificationService.notify_route_updated(
+                db=db,
+                driver_id=d_id,
+                vehicle_id=None,
+                stop_count=len(recalculated.stops),
+                total_distance_km=recalculated.total_distance_km,
+                total_eta_minutes=recalculated.estimated_duration_minutes,
+                reason="P0 Emergency priority incident preempted route",
+            )
+    except Exception as e:
+        logger.warning(f"Failed to create route updated notification: {e}")
 
     return {
         "status": "success",

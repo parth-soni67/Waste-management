@@ -19,6 +19,9 @@ import {
   Check,
   CheckCircle2,
   Layers,
+  Phone,
+  PhoneCall,
+  Copy,
 } from "lucide-react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
@@ -27,6 +30,8 @@ import { EvidenceImage } from "@/components/ui/EvidenceImage";
 import type { DriverMapIncident } from "./DriverMap";
 
 import CameraCaptureModal from "./CameraCaptureModal";
+import NotificationCenter from "@/components/notifications/NotificationCenter";
+import NotificationToast, { ToastPayload } from "@/components/notifications/NotificationToast";
 import { fetchRoadRoute, formatRouteDistance, formatRouteEta } from "@/lib/services/mapboxService";
 
 // Dynamically import MapLibre Component (disable SSR)
@@ -68,6 +73,8 @@ export interface DriverAssignment {
   cluster_image_urls?: string[];
   citizen_image_urls?: string[];
   proof_image_urls?: string[];
+  citizen_name?: string;
+  citizen_phone?: string;
 }
 
 export interface CollectionProofItem {
@@ -163,6 +170,19 @@ export default function DriverPage() {
   const [uploadedProof, setUploadedProof] = useState<CollectionProofItem | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+  const [activeToast, setActiveToast] = useState<ToastPayload | null>(null);
+  const [copiedPhone, setCopiedPhone] = useState<string | null>(null);
+
+  const handleCopyPhone = (phoneNum: string) => {
+    if (!phoneNum) return;
+    try {
+      navigator.clipboard.writeText(phoneNum);
+      setCopiedPhone(phoneNum);
+      setTimeout(() => setCopiedPhone(null), 2500);
+    } catch (err) {
+      console.warn("Copy to clipboard error:", err);
+    }
+  };
   const [isStartingCollection, setIsStartingCollection] = useState<boolean>(false);
   const [isCompletingCollection, setIsCompletingCollection] = useState<boolean>(false);
 
@@ -364,6 +384,7 @@ export default function DriverPage() {
           try {
             const msg = JSON.parse(event.data);
             if (
+              msg.type === "NOTIFICATION_CREATED" ||
               msg.type === "INCIDENT_ASSIGNED" ||
               msg.type === "NEW_INCIDENT_ASSIGNED" ||
               msg.type === "INCIDENT_UPDATED" ||
@@ -372,19 +393,57 @@ export default function DriverPage() {
               msg.type === "COLLECTION_PROOF_UPLOADED" ||
               msg.type === "INCIDENT_PROOF_SUBMITTED" ||
               msg.type === "INCIDENT_VERIFIED" ||
-              msg.type === "INCIDENT_PROOF_REJECTED"
+              msg.type === "INCIDENT_PROOF_REJECTED" ||
+              msg.type === "LOOP_C_DYNAMIC_REROUTE"
             ) {
-              if (msg.type === "INCIDENT_ASSIGNED" || msg.type === "NEW_INCIDENT_ASSIGNED") {
-                setActionSuccess("🚨 New waste collection stop assigned by Municipal Officer!");
-                setTimeout(() => setActionSuccess(null), 5000);
+              if (msg.type === "NOTIFICATION_CREATED" && msg.data) {
+                const notif = msg.data;
+                if (!notif.user_id || notif.user_id === user?.id || notif.recipient_role === "driver") {
+                  setActiveToast({
+                    id: notif.id,
+                    title: notif.title,
+                    message: notif.message,
+                    priority: notif.priority,
+                    incident_id: notif.incident_id,
+                    incident_code: notif.incident_code,
+                    notification_type: notif.notification_type,
+                  });
+                }
+              } else if (msg.type === "INCIDENT_ASSIGNED" || msg.type === "NEW_INCIDENT_ASSIGNED") {
+                const isP0 = msg.data?.priority === "P0";
+                const isP1 = msg.data?.priority === "P1";
+                setActiveToast({
+                  title: isP0 || isP1 ? `🚨 ${msg.data?.priority || "P1"} Critical Incident Assigned` : "New Waste Incident Assigned",
+                  message: msg.data?.address ? `Assigned to your vehicle at ${msg.data.address}` : "A new incident stop has been added to your route.",
+                  priority: msg.data?.priority || "P1",
+                  incident_id: msg.data?.incident_id,
+                  incident_code: msg.data?.incident_code,
+                  notification_type: "NEW_INCIDENT_ASSIGNED",
+                });
               } else if (msg.type === "INCIDENT_PROOF_REJECTED") {
-                setActionError(
-                  `⚠️ Proof rejected by Officer: ${msg.rejection_reason || "Area not fully cleared"}. Please retake and upload proof.`
-                );
+                setActiveToast({
+                  title: "Collection Proof Rejected",
+                  message: msg.rejection_reason || "Area not fully cleared. Please review and retake proof.",
+                  priority: "P1",
+                  incident_id: msg.data?.incident_id,
+                  notification_type: "PROOF_REJECTED",
+                });
                 setUploadedProof(null);
               } else if (msg.type === "INCIDENT_VERIFIED") {
-                setActionSuccess("✅ Proof verified by Municipal Officer! Great job.");
-                setTimeout(() => setActionSuccess(null), 6000);
+                setActiveToast({
+                  title: "Collection Proof Verified",
+                  message: "Your proof has been verified by the Municipal Officer. Stop completed.",
+                  priority: "P2",
+                  incident_id: msg.data?.incident_id,
+                  notification_type: "PROOF_VERIFIED",
+                });
+              } else if (msg.type === "ROUTE_UPDATED" || msg.type === "LOOP_C_DYNAMIC_REROUTE") {
+                setActiveToast({
+                  title: "Route Updated",
+                  message: "Your collection route has been recalculated and optimized.",
+                  priority: "P2",
+                  notification_type: "ROUTE_UPDATED",
+                });
               }
               void fetchAssignments();
             }
@@ -591,7 +650,7 @@ export default function DriverPage() {
   }
 
   // Render Gate: Unauthenticated or Not Driver
-  if (!user || (user.role !== "driver" && user.role !== "officer" && user.role !== "admin")) {
+  if (!user || (user.role !== "driver" && user.role !== "admin")) {
     return (
       <div className="min-h-screen bg-[var(--color-canvas)] flex items-center justify-center p-4">
         <div className="w-full max-w-md bg-white rounded-3xl p-8 border border-slate-200 shadow-xl text-center">
@@ -600,7 +659,9 @@ export default function DriverPage() {
           </div>
           <h1 className="text-lg font-bold text-slate-900 mb-2">Driver Authentication Required</h1>
           <p className="text-xs text-slate-500 mb-6 leading-relaxed">
-            Please log in with an authorized Municipal Driver account to access vehicle navigation, route dispatches, and proof-of-work submission.
+            {!user
+              ? "Please log in with an authorized Municipal Driver account to access vehicle navigation, route dispatches, and proof-of-work submission."
+              : `Access Denied: Your current role is '${String(user.role).toUpperCase()}'. Driver credentials are required to access the Driver Cockpit.`}
           </p>
           <Link
             href="/"
@@ -665,6 +726,16 @@ export default function DriverPage() {
                 </span>
               )}
             </div>
+
+            {/* Real-time Notification Center */}
+            <NotificationCenter
+              apiUrl={apiUrl}
+              getAuthHeaders={getAuthHeaders}
+              onSelectIncident={(incId) => {
+                setActiveIncidentId(incId);
+              }}
+              onRefreshData={() => void fetchAssignments()}
+            />
 
             {/* Refresh Button */}
             <button
@@ -986,6 +1057,52 @@ export default function DriverPage() {
                   </span>
                 </div>
 
+                {/* CITIZEN CONTACT SECTION */}
+                <div className="p-3.5 rounded-2xl bg-white border border-slate-200/90 shadow-sm space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-extrabold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                      <User className="w-3.5 h-3.5 text-emerald-600" />
+                      Citizen Contact
+                    </span>
+                    <span className="text-[10px] font-bold bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full border border-emerald-200/60">
+                      Assigned Driver Access
+                    </span>
+                  </div>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                    <div>
+                      <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                        <span>{currentAssignment.citizen_name || "Citizen Reporter"}</span>
+                      </div>
+                      <div className="text-xs font-mono font-bold text-slate-700 mt-0.5 flex items-center gap-1.5">
+                        <Phone className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                        <span>{currentAssignment.citizen_phone || "Phone Not Provided"}</span>
+                      </div>
+                    </div>
+                    {currentAssignment.citizen_phone && (
+                      <div className="flex items-center gap-2">
+                        <a
+                          href={`tel:${currentAssignment.citizen_phone}`}
+                          className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition-all active:scale-95 cursor-pointer"
+                        >
+                          <PhoneCall className="w-3.5 h-3.5" />
+                          <span>Call Citizen</span>
+                        </a>
+                        <button
+                          type="button"
+                          onClick={() => handleCopyPhone(currentAssignment.citizen_phone!)}
+                          className="px-2.5 py-1.5 rounded-xl bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-bold flex items-center gap-1 transition-all active:scale-95 cursor-pointer shadow-xs"
+                        >
+                          <Copy className="w-3.5 h-3.5 text-slate-500" />
+                          <span>{copiedPhone === currentAssignment.citizen_phone ? "Copied!" : "Copy"}</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-slate-400 font-medium italic border-t border-slate-100 pt-1">
+                    Contact details are visible only to the driver assigned to this incident.
+                  </p>
+                </div>
+
 
                 {/* Primary Citizen Report Photo(s) */}
                 {currentAssignment.primary_image_urls && currentAssignment.primary_image_urls.length > 0 && (
@@ -1224,6 +1341,17 @@ export default function DriverPage() {
         isOpen={isCameraModalOpen}
         onClose={() => setIsCameraModalOpen(false)}
         onPhotoCaptured={handleCameraPhotoCaptured}
+      />
+
+      {/* Floating Actionable Notification Toast */}
+      <NotificationToast
+        toast={activeToast}
+        onDismiss={() => setActiveToast(null)}
+        onAction={(incId) => {
+          if (incId) {
+            setActiveIncidentId(incId);
+          }
+        }}
       />
     </div>
   );

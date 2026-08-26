@@ -20,69 +20,73 @@ export default function AuthCard() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  // Demo accounts for fast evaluation (calls real backend auth API)
-  const handleQuickDemo = async (role: "citizen" | "driver" | "officer" | "admin") => {
+  const handlePrefillAccount = (demoEmail: string, demoPass: string) => {
     setErrorMessage(null);
     setSuccessMessage(null);
-    let demoEmail = "citizen@wastewise.gov";
-    let demoPass = "citizenPass123!";
-
-    if (role === "driver") {
-      demoEmail = "driver@wastewise.gov";
-      demoPass = "driverPass123!";
-    } else if (role === "officer") {
-      demoEmail = "officer@wastewise.gov";
-      demoPass = "officerPass123!";
-    } else if (role === "admin") {
-      demoEmail = "admin@wastewise.gov";
-      demoPass = "adminPass123!";
-    }
-
     setEmail(demoEmail);
     setPassword(demoPass);
-    setLoading(true);
-
-    try {
-      const authUser = await login(demoEmail, demoPass);
-      if (authUser.role === "driver") {
-        router.push("/driver");
-      } else if (authUser.role === "officer" || authUser.role === "admin") {
-        router.push("/officer");
-      } else {
-        router.push("/citizen");
-      }
-    } catch (err: unknown) {
-      setErrorMessage(err instanceof Error ? err.message : "Authentication failed");
-    } finally {
-      setLoading(false);
-    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (loading) return;
     setErrorMessage(null);
     setSuccessMessage(null);
+
+    const cleanEmail = email.trim();
+    if (!cleanEmail) {
+      setErrorMessage("Please enter your email address.");
+      return;
+    }
+    if (mode !== "forgot" && !password) {
+      setErrorMessage("Please enter your password.");
+      return;
+    }
+
     setLoading(true);
 
     try {
       if (mode === "signin") {
-        const authUser = await login(email, password);
-        if (authUser.role === "driver") {
+        const authUser = await login(cleanEmail, password);
+        const userRole = String(authUser.role).toLowerCase();
+
+        // Redirect according to the authenticated user's real database role
+        if (userRole === "driver") {
           router.push("/driver");
-        } else if (authUser.role === "officer" || authUser.role === "admin") {
+        } else if (userRole === "officer") {
           router.push("/officer");
+        } else if (userRole === "admin") {
+          router.push("/admin");
         } else {
           router.push("/citizen");
         }
       } else if (mode === "signup") {
-        await register(email, password, fullName, phone);
+        if (!phone || !phone.trim()) {
+          setErrorMessage("Phone number is required.");
+          setLoading(false);
+          return;
+        }
+        const digits = phone.replace(/\D/g, "");
+        if (digits.length !== 10 && (digits.length !== 12 || !digits.startsWith("91"))) {
+          setErrorMessage("Enter a valid 10-digit Indian mobile number.");
+          setLoading(false);
+          return;
+        }
+        const mobileDigits = digits.length === 12 ? digits.slice(2) : digits;
+        if (!"6789".includes(mobileDigits[0])) {
+          setErrorMessage("Enter a valid 10-digit Indian mobile number.");
+          setLoading(false);
+          return;
+        }
+
+        await register(cleanEmail, password, fullName, phone);
         setSuccessMessage("Account created successfully! Redirecting to citizen portal...");
-        setTimeout(() => router.push("/citizen"), 1000);
+        setTimeout(() => router.push("/citizen"), 800);
       } else {
-        setSuccessMessage("Password reset link has been dispatched to your email.");
+        setSuccessMessage("Password reset instructions have been dispatched to your email.");
       }
     } catch (err: unknown) {
-      setErrorMessage(err instanceof Error ? err.message : "Invalid email or password");
+      setErrorMessage(err instanceof Error ? err.message : "Authentication failed. Please verify credentials.");
     } finally {
       setLoading(false);
     }
@@ -191,7 +195,7 @@ export default function AuthCard() {
             >
               <div>
                 <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-ink)" }}>
-                  Full name
+                  Full name <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="text"
@@ -207,10 +211,11 @@ export default function AuthCard() {
               </div>
               <div>
                 <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-ink)" }}>
-                  Phone number (optional)
+                  Phone number <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="tel"
+                  required
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
                   placeholder="+91 98765 43210"
@@ -225,7 +230,7 @@ export default function AuthCard() {
 
           <div>
             <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-ink)" }}>
-              Email address
+              Email address <span className="text-red-500">*</span>
             </label>
             <input
               type="email"
@@ -244,7 +249,7 @@ export default function AuthCard() {
             <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="text-xs font-semibold" style={{ color: "var(--color-ink)" }}>
-                  Password
+                  Password <span className="text-red-500">*</span>
                 </label>
                 {mode === "signin" && (
                   <button
@@ -275,14 +280,21 @@ export default function AuthCard() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-2.5 px-4 rounded-lg text-white font-semibold text-sm flex items-center justify-center gap-2 transition-transform active:scale-[0.98] shadow-sm hover:opacity-95 cursor-pointer"
+            className="w-full py-2.5 px-4 rounded-lg text-white font-semibold text-sm flex items-center justify-center gap-2 transition-transform active:scale-[0.98] shadow-sm hover:opacity-95 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
             style={{
               backgroundColor: "var(--color-primary)",
               borderRadius: "var(--radius-button)",
             }}
           >
             {loading ? (
-              <span className="inline-block animate-spin">⟳</span>
+              <span className="flex items-center gap-2">
+                <span className="inline-block animate-spin">⟳</span>
+                <span>
+                  {mode === "signin" && "Signing in..."}
+                  {mode === "signup" && "Creating account..."}
+                  {mode === "forgot" && "Sending link..."}
+                </span>
+              </span>
             ) : (
               <>
                 <span>
@@ -296,55 +308,58 @@ export default function AuthCard() {
           </button>
         </form>
 
-        {/* WebAuthn / Passkey option per security_guide.md §1 & design_guide.md §5 */}
+        {/* Informational Demo Credentials (No bypass — Real Database Authentication Required) */}
         {mode === "signin" && (
-          <div className="mt-4 pt-4 border-t border-slate-100">
-            <button
-              type="button"
-              onClick={() => void handleQuickDemo("citizen")}
-              className="w-full py-2 px-3 rounded-lg text-xs font-medium border flex items-center justify-center gap-2 transition-colors hover:bg-slate-50 cursor-pointer text-slate-700"
-              style={{ borderColor: "rgba(20, 32, 26, 0.15)" }}
-            >
-              <UserCheck className="w-3.5 h-3.5 text-slate-500" />
-              <span>Instant Passkey Access (Citizen)</span>
-            </button>
+          <div className="mt-5 pt-4 border-t border-slate-100">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[11px] font-semibold tracking-wide uppercase text-slate-500 flex items-center gap-1">
+                <Sparkles className="w-3 h-3 text-amber-600" /> Demo Account Credentials
+              </span>
+              <span className="text-[10px] text-slate-400">Argon2id Verified</span>
+            </div>
+            <div className="grid grid-cols-2 gap-1.5">
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => handlePrefillAccount("citizen@wastewise.gov", "password123")}
+                className="py-1.5 px-2 rounded-md text-[11px] font-medium bg-[#F0EBE1] hover:bg-[#E5DEC4] text-slate-800 transition-colors flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50"
+                title="Fill Citizen credentials (citizen@wastewise.gov / password123)"
+              >
+                <UserCheck className="w-3 h-3 text-emerald-700" /> Citizen
+              </button>
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => handlePrefillAccount("driver@wastewise.gov", "password123")}
+                className="py-1.5 px-2 rounded-md text-[11px] font-medium bg-[#F0EBE1] hover:bg-[#E5DEC4] text-slate-800 transition-colors flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50"
+                title="Fill Driver credentials (driver@wastewise.gov / password123)"
+              >
+                <Truck className="w-3 h-3 text-teal-700" /> Driver
+              </button>
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => handlePrefillAccount("officer@wastewise.gov", "password123")}
+                className="py-1.5 px-2 rounded-md text-[11px] font-medium bg-[#F0EBE1] hover:bg-[#E5DEC4] text-slate-800 transition-colors flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50"
+                title="Fill Officer credentials (officer@wastewise.gov / password123)"
+              >
+                <ShieldCheck className="w-3 h-3 text-amber-700" /> Officer
+              </button>
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => handlePrefillAccount("admin@wastewise.gov", "password123")}
+                className="py-1.5 px-2 rounded-md text-[11px] font-medium bg-[#F0EBE1] hover:bg-[#E5DEC4] text-slate-800 transition-colors flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50"
+                title="Fill Admin credentials (admin@wastewise.gov / password123)"
+              >
+                <ShieldCheck className="w-3 h-3 text-purple-700" /> Admin
+              </button>
+            </div>
+            <p className="text-[10px] text-slate-400 mt-2 text-center">
+              All logins authenticate directly against PostgreSQL via POST /api/v1/auth/login
+            </p>
           </div>
         )}
-
-        {/* Demo Fast-Switch Buttons (Evaluation Aid — Real Database Authentication) */}
-        <div className="mt-5 pt-4 border-t border-slate-100">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-semibold tracking-wide uppercase text-slate-500 flex items-center gap-1">
-              <Sparkles className="w-3 h-3 text-amber-600" /> Quick Demo Roles
-            </span>
-          </div>
-          <div className="grid grid-cols-3 gap-1.5">
-            <button
-              type="button"
-              disabled={loading}
-              onClick={() => void handleQuickDemo("citizen")}
-              className="py-1.5 px-2 rounded-md text-[11px] font-medium bg-[#F0EBE1] hover:bg-[#E5DEC4] text-slate-800 transition-colors flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50"
-            >
-              <UserCheck className="w-3 h-3 text-emerald-700" /> Citizen
-            </button>
-            <button
-              type="button"
-              disabled={loading}
-              onClick={() => void handleQuickDemo("driver")}
-              className="py-1.5 px-2 rounded-md text-[11px] font-medium bg-[#F0EBE1] hover:bg-[#E5DEC4] text-slate-800 transition-colors flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50"
-            >
-              <Truck className="w-3 h-3 text-teal-700" /> Driver
-            </button>
-            <button
-              type="button"
-              disabled={loading}
-              onClick={() => void handleQuickDemo("officer")}
-              className="py-1.5 px-2 rounded-md text-[11px] font-medium bg-[#F0EBE1] hover:bg-[#E5DEC4] text-slate-800 transition-colors flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50"
-            >
-              <ShieldCheck className="w-3 h-3 text-amber-700" /> Officer
-            </button>
-          </div>
-        </div>
       </motion.div>
 
       {/* Secondary mode switch link below card per GitHub pattern */}

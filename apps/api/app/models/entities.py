@@ -381,7 +381,30 @@ class Notification(Base):
     notification_type: Mapped[str] = mapped_column(
         String(50), default="info", nullable=False
     )
+    priority: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    incident_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("incidents.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    vehicle_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("vehicles.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    recipient_role: Mapped[Optional[str]] = mapped_column(
+        String(50), nullable=True
+    )
+    action_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     is_read: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    read_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    metadata_json: Mapped[Optional[dict]] = mapped_column(
+        JSON, default=dict, nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
@@ -389,6 +412,8 @@ class Notification(Base):
     )
 
     user: Mapped["User"] = relationship("User", back_populates="notifications")
+    incident: Mapped[Optional["Incident"]] = relationship("Incident")
+    vehicle: Mapped[Optional["Vehicle"]] = relationship("Vehicle")
 
 
 class CollectionProof(Base):

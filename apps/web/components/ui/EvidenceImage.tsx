@@ -51,8 +51,8 @@ export function EvidenceImage({
   const [isLightboxOpen, setIsLightboxOpen] = useState<boolean>(false);
   const [retryCount, setRetryCount] = useState<number>(0);
 
-  // Default object-fit: "contain" for evidence to prevent cropping important details; "cover" for thumbnails
-  const finalObjectFit = objectFit ?? (variant === "thumbnail" ? "cover" : "contain");
+  // Default object-fit: "cover" for clean container fill, "contain" if explicitly requested
+  const finalObjectFit = objectFit ?? "cover";
 
   // Reset state when src or retry changes
   useEffect(() => {
@@ -97,7 +97,7 @@ export function EvidenceImage({
       case "1/1":
         return "aspect-square";
       default:
-        return "h-48 sm:h-56";
+        return "min-h-[220px] max-h-[360px] aspect-[4/3]";
     }
   };
 
@@ -119,25 +119,25 @@ export function EvidenceImage({
   return (
     <>
       <div
-        className={`relative group rounded-xl overflow-hidden border border-slate-800 bg-slate-950 flex items-center justify-center ${getAspectRatioClass()} ${className}`}
+        className={`relative group rounded-xl overflow-hidden border border-slate-200 bg-slate-100 dark:border-slate-800 dark:bg-slate-950 flex items-center justify-center ${getAspectRatioClass()} ${className}`}
       >
         {/* SKELETON LOADING STATE */}
         {isLoading && !showFallback && (
-          <div className="absolute inset-0 z-10 bg-slate-900 animate-pulse flex flex-col items-center justify-center p-4 text-center text-slate-500 gap-2 border border-slate-800">
+          <div className="absolute inset-0 z-10 bg-slate-100 dark:bg-slate-900 animate-pulse flex flex-col items-center justify-center p-4 text-center text-slate-500 gap-2 border border-slate-200 dark:border-slate-800">
             <div className="w-6 h-6 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
               Loading Evidence Photo...
             </span>
           </div>
         )}
 
-        {/* INTENTIONAL DARK FALLBACK CARD */}
+        {/* INTENTIONAL FALLBACK CARD */}
         {showFallback ? (
-          <div className="w-full h-full flex flex-col items-center justify-center p-4 text-center bg-slate-950/90 text-slate-400 border border-slate-800/80 rounded-xl space-y-1.5">
-            <div className="p-2.5 rounded-full bg-slate-900 border border-slate-800 text-slate-500 mb-0.5">
+          <div className="w-full h-full flex flex-col items-center justify-center p-4 text-center bg-slate-50 dark:bg-slate-950/90 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-800/80 rounded-xl space-y-1.5">
+            <div className="p-2.5 rounded-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-400 mb-0.5">
               <ImageIcon className="w-5 h-5" />
             </div>
-            <span className="text-xs font-bold text-slate-300 block">{fallbackTitle}</span>
+            <span className="text-xs font-bold text-slate-700 dark:text-slate-300 block">{fallbackTitle}</span>
             <span className="text-[10px] text-slate-500 max-w-[200px] leading-tight block">
               {fallbackDescription}
             </span>
@@ -145,9 +145,9 @@ export function EvidenceImage({
               <button
                 type="button"
                 onClick={handleManualRetry}
-                className="mt-2 px-3 py-1 rounded-lg text-[10px] font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center gap-1.5 cursor-pointer transition-colors shadow-xs"
+                className="mt-2 px-3 py-1 rounded-lg text-[10px] font-bold bg-white dark:bg-slate-800 hover:bg-slate-100 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 flex items-center gap-1.5 cursor-pointer transition-colors shadow-xs"
               >
-                <RotateCw className="w-3 h-3 text-emerald-400" />
+                <RotateCw className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
                 <span>Retry Loading</span>
               </button>
             )}
@@ -155,7 +155,7 @@ export function EvidenceImage({
         ) : (
           /* ACTUAL IMAGE — ONLY RENDERED WHEN isUrlValid IS STRICTLY TRUE */
           isUrlValid && (
-            <div className="relative w-full h-full flex items-center justify-center bg-slate-950">
+            <div className="relative w-full h-full flex items-center justify-center bg-slate-900">
               <img
                 src={resolvedUrl}
                 alt={alt}
@@ -166,9 +166,9 @@ export function EvidenceImage({
                 }}
                 onClick={() => enableLightbox && setIsLightboxOpen(true)}
                 className={`w-full h-full ${
-                  finalObjectFit === "cover" ? "object-cover" : "object-contain"
+                  finalObjectFit === "contain" ? "object-contain" : "object-cover"
                 } ${
-                  enableLightbox ? "cursor-pointer hover:opacity-95 transition-opacity" : ""
+                  enableLightbox ? "cursor-pointer hover:scale-[1.02] transition-all duration-200" : ""
                 } ${imgClassName}`}
               />
 
@@ -187,10 +187,11 @@ export function EvidenceImage({
                     e.stopPropagation();
                     setIsLightboxOpen(true);
                   }}
-                  className="absolute top-2 right-2 p-1.5 rounded-lg bg-black/60 hover:bg-black/80 text-white backdrop-blur-xs opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer z-10 shadow-md"
+                  className="absolute top-2 right-2 px-2 py-1 rounded-lg bg-black/70 hover:bg-black/90 text-white backdrop-blur-xs text-[10px] font-bold flex items-center gap-1 opacity-90 group-hover:opacity-100 transition-opacity cursor-pointer z-10 shadow-md"
                   title="Expand Full Resolution View"
                 >
-                  <Eye className="w-3.5 h-3.5" />
+                  <Eye className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Zoom</span>
                 </button>
               )}
             </div>

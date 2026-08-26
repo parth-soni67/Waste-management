@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from typing import Tuple
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import (
@@ -26,9 +26,10 @@ from app.schemas.all_schemas import UserLoginRequest, UserRegisterRequest
 class AuthService:
     @staticmethod
     async def register_citizen(db: AsyncSession, payload: UserRegisterRequest) -> User:
-        """Register a new citizen user."""
-        # Check if email already exists
-        stmt = select(User).where(User.email == payload.email)
+        """Register a new citizen user with normalized email."""
+        normalized_email = payload.email.strip().lower()
+        # Check if email already exists (case-insensitive)
+        stmt = select(User).where(func.lower(User.email) == normalized_email)
         res = await db.execute(stmt)
         if res.scalar_one_or_none():
             raise HTTPException(
@@ -37,7 +38,7 @@ class AuthService:
             )
 
         new_user = User(
-            email=payload.email,
+            email=normalized_email,
             hashed_password=hash_password(payload.password),
             full_name=payload.full_name,
             phone_number=payload.phone_number,
@@ -57,7 +58,8 @@ class AuthService:
         Authenticate user with constant-time Argon2id verification.
         Returns (User, access_token, refresh_token).
         """
-        stmt = select(User).where(User.email == payload.email)
+        normalized_email = payload.email.strip().lower()
+        stmt = select(User).where(func.lower(User.email) == normalized_email)
         res = await db.execute(stmt)
         user = res.scalar_one_or_none()
 

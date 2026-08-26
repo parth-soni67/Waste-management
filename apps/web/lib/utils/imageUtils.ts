@@ -14,7 +14,7 @@ export function resolveImageUrl(src: string | null | undefined): string {
     return "";
   }
 
-  const trimmed = src.trim();
+  let trimmed = src.trim();
   if (!trimmed) {
     return "";
   }
@@ -29,12 +29,24 @@ export function resolveImageUrl(src: string | null | undefined): string {
     return trimmed;
   }
 
+  // Handle local storage path prefixes (e.g. local/reports/2026_08/xxx.jpg -> /uploads/2026_08/xxx.jpg)
+  if (trimmed.startsWith("local/reports/")) {
+    trimmed = trimmed.replace("local/reports/", "/uploads/");
+  } else if (trimmed.startsWith("local/")) {
+    trimmed = trimmed.replace("local/", "/uploads/");
+  }
+
   // Base API URL from environment variables or default local backend
   const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/+$/, "");
 
-  // If path starts with /uploads, uploads/, /static, static/, etc.
-  const path = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+  // Ensure leading slash
+  let path = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
   
+  // If path doesn't start with /uploads or /images or /static, default to /uploads prefix
+  if (!path.startsWith("/uploads") && !path.startsWith("/images") && !path.startsWith("/static")) {
+    path = `/uploads${path}`;
+  }
+
   return `${apiUrl}${path}`;
 }
 

@@ -53,18 +53,47 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = async (email: string, password: string): Promise<AuthUser> => {
     setIsLoading(true);
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/$/, "");
+    const normalizedEmail = email ? email.trim().toLowerCase() : "";
 
+    let res: Response;
     try {
-      const res = await fetch(`${apiUrl}/api/v1/auth/login`, {
+      res = await fetch(`${apiUrl}/api/v1/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email: normalizedEmail, password }),
       });
+    } catch (networkErr) {
+      setIsLoading(false);
+      console.warn("Network error during login:", networkErr);
+      throw new Error("Unable to connect to the authentication server. Please try again.");
+    }
 
+    try {
       if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.detail || "Invalid email or password");
+        let errorDetail = "";
+        try {
+          const errData = await res.json();
+          if (typeof errData?.detail === "string") {
+            errorDetail = errData.detail;
+          } else if (Array.isArray(errData?.detail)) {
+            errorDetail = errData.detail.map((e: { msg?: string }) => e.msg).filter(Boolean).join("; ");
+          }
+        } catch {}
+
+        if (res.status === 401) {
+          throw new Error(errorDetail || "Invalid email or password");
+        } else if (res.status === 403) {
+          throw new Error(errorDetail || "Account is inactive or lacks required access permissions.");
+        } else if (res.status === 404) {
+          throw new Error("Authentication service endpoint unavailable.");
+        } else if (res.status === 422) {
+          throw new Error(errorDetail || "Invalid input format. Please check your email and password.");
+        } else if (res.status >= 500) {
+          throw new Error("Internal server error. Please try again later.");
+        } else {
+          throw new Error(errorDetail || "Authentication failed. Please check your credentials.");
+        }
       }
 
       const data = await res.json();
@@ -72,13 +101,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         id: data.user_id,
         email: data.email,
         fullName: data.full_name,
-        role: data.role,
+        role: String(data.role).toLowerCase(),
       };
 
       setUser(authUser);
       setToken(data.access_token);
 
-      // Store in sessionStorage (session lifetime only)
+      // Store in sessionStorage (persists across page reloads in the current tab session)
       try {
         sessionStorage.setItem(
           AUTH_STORAGE_KEY,
@@ -99,27 +128,52 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     phone?: string
   ): Promise<void> => {
     setIsLoading(true);
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/$/, "");
+    const normalizedEmail = email ? email.trim().toLowerCase() : "";
 
+    let res: Response;
     try {
-      const res = await fetch(`${apiUrl}/api/v1/auth/register`, {
+      res = await fetch(`${apiUrl}/api/v1/auth/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          email,
+          email: normalizedEmail,
           password,
-          full_name: fullName,
-          phone_number: phone || null,
+          full_name: fullName.trim(),
+          phone_number: phone,
         }),
       });
+    } catch (networkErr) {
+      setIsLoading(false);
+      console.warn("Network error during registration:", networkErr);
+      throw new Error("Unable to connect to the authentication server. Please try again.");
+    }
 
+    try {
       if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.detail || "Failed to create account");
+        let errorDetail = "";
+        try {
+          const errData = await res.json();
+          if (typeof errData?.detail === "string") {
+            errorDetail = errData.detail;
+          } else if (Array.isArray(errData?.detail)) {
+            errorDetail = errData.detail.map((e: { msg?: string }) => e.msg).filter(Boolean).join("; ");
+          }
+        } catch {}
+
+        if (res.status === 400 || res.status === 409) {
+          throw new Error(errorDetail || "Email is already registered. Please sign in instead.");
+        } else if (res.status === 422) {
+          throw new Error(errorDetail || "Please enter valid account information.");
+        } else if (res.status >= 500) {
+          throw new Error("Internal server error during registration. Please try again.");
+        } else {
+          throw new Error(errorDetail || "Failed to create account.");
+        }
       }
 
       // Auto-login after successful registration
-      await login(email, password);
+      await login(normalizedEmail, password);
     } finally {
       setIsLoading(false);
     }

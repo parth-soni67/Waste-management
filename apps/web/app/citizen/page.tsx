@@ -20,6 +20,7 @@ import {
   X,
   User,
   LogOut,
+  Lock,
 } from "lucide-react";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
@@ -76,7 +77,7 @@ interface CVAnalysis {
 }
 
 export default function CitizenPage() {
-  const { user, logout, getAuthHeaders } = useAuth();
+  const { user, logout, getAuthHeaders, isLoading } = useAuth();
   const [activeTab, setActiveTab] = useState<"report" | "history">("report");
   const [images, setImages] = useState<string[]>([]);
   const [uploadedImageUrls, setUploadedImageUrls] = useState<string[]>([]);
@@ -491,10 +492,36 @@ export default function CitizenPage() {
     };
   }, [cameraStream]);
 
-  if (!mounted) {
+  if (!mounted || isLoading) {
     return (
       <div className="min-h-screen bg-[var(--color-canvas)] p-8 flex items-center justify-center">
         <div className="animate-pulse text-sm text-slate-500 font-medium">Loading Citizen Portal...</div>
+      </div>
+    );
+  }
+
+  // Authorization Gate: Citizen or Admin account required
+  if (!user || (user.role !== "citizen" && user.role !== "admin")) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4 bg-[var(--color-canvas)]">
+        <div className="max-w-md w-full bg-white rounded-2xl p-8 border border-slate-200 shadow-sm text-center">
+          <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center mx-auto mb-4 border border-blue-200">
+            <Lock className="w-6 h-6" />
+          </div>
+          <h2 className="text-lg font-bold mb-2">Citizen Authentication Required</h2>
+          <p className="text-xs text-slate-500 mb-6 leading-relaxed">
+            {!user
+              ? "Please log in with a Citizen account to submit municipal reports, track resolution status, and access citizen rewards."
+              : `Access Denied: Your current role is '${String(user.role).toUpperCase()}'. Please log in with a citizen account to access this portal.`}
+          </p>
+          <Link
+            href="/"
+            className="inline-flex items-center justify-center gap-2 w-full py-2.5 px-4 rounded-xl text-xs font-bold text-white shadow-sm hover:opacity-90 transition-all cursor-pointer"
+            style={{ backgroundColor: "var(--color-primary)" }}
+          >
+            Go to Authentication Portal
+          </Link>
+        </div>
       </div>
     );
   }
@@ -983,7 +1010,7 @@ export default function CitizenPage() {
                     <span className="text-xs font-bold text-slate-700">Status:</span>
                     <span
                       className={`text-xs font-bold px-2.5 py-1 rounded-md border flex items-center gap-1 ${
-                        report.status === "COMPLETED" || report.status === "VERIFIED" || report.status === "APPROVED"
+                        report.status === "COMPLETED" || (report.status as string) === "VERIFIED" || (report.status as string) === "APPROVED"
                           ? "bg-emerald-100 text-emerald-800 border-emerald-300"
                           : report.status === "UNDER_REVIEW"
                           ? "bg-blue-100 text-blue-800 border-blue-300"
@@ -994,7 +1021,7 @@ export default function CitizenPage() {
                           : "bg-amber-100 text-amber-800 border-amber-300"
                       }`}
                     >
-                      {report.status === "COMPLETED" || report.status === "VERIFIED" || report.status === "APPROVED"
+                      {report.status === "COMPLETED" || (report.status as string) === "VERIFIED" || (report.status as string) === "APPROVED"
                         ? "🟢 COMPLETED"
                         : report.status === "UNDER_REVIEW"
                         ? "🔵 UNDER REVIEW BY OFFICER"

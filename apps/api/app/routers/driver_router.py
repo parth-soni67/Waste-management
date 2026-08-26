@@ -30,6 +30,7 @@ from app.models.entities import (
     Incident,
     IncidentStatus,
     PriorityLevel,
+    Report,
     UserRole,
     Vehicle,
 )
@@ -40,6 +41,7 @@ from app.schemas.all_schemas import (
     DriverLocationRead,
     IncidentCompleteRequest,
 )
+from app.services.notification_service import NotificationService
 from app.services.storage_service import StorageService, detect_image_mime
 from app.ws.live_ws import ws_manager
 
@@ -91,7 +93,7 @@ async def get_driver_assignments(
     inc_stmt = (
         select(Incident)
         .options(
-            selectinload(Incident.reports),
+            selectinload(Incident.reports).selectinload(Report.user),
             selectinload(Incident.proofs),
             selectinload(Incident.assigned_vehicle),
         )
@@ -153,14 +155,25 @@ async def get_driver_assignments(
         )
         sla_left = max(0, target_sla - elapsed_mins)
 
-        # Separate primary report evidence from clustered report evidence
+        # Separate primary report evidence from clustered report evidence and extract citizen contact
         sorted_reports = sorted(
             inc.reports, key=lambda r: r.created_at or inc.created_at
         )
         primary_imgs: List[str] = []
         cluster_imgs: List[str] = []
+        citizen_name: Optional[str] = None
+        citizen_phone: Optional[str] = None
 
         if sorted_reports:
+            for rep in sorted_reports:
+                if rep.user:
+                    if not citizen_name:
+                        citizen_name = rep.user.full_name
+                    if rep.user.phone_number:
+                        citizen_name = rep.user.full_name
+                        citizen_phone = rep.user.phone_number
+                        break
+
             primary_rep = sorted_reports[0]
             if primary_rep.image_urls:
                 primary_imgs = list(primary_rep.image_urls)
@@ -220,6 +233,8 @@ async def get_driver_assignments(
                 cluster_image_urls=cluster_imgs,
                 citizen_image_urls=distinct_citizen_imgs,
                 proof_image_urls=proof_imgs,
+                citizen_name=citizen_name,
+                citizen_phone=citizen_phone,
             )
         )
 
@@ -365,6 +380,17 @@ async def start_collection(
         },
     )
 
+    # Notify Officers and Admins
+    try:
+        driver_name = getattr(current_user, "email", None) or getattr(current_user, "full_name", None) or "Assigned Driver"
+        await NotificationService.notify_collection_started(
+            db=db,
+            incident=incident,
+            driver_name=driver_name,
+        )
+    except Exception as e:
+        logger.error(f"Error in notify_collection_started: {e}", exc_info=True)
+
     return {
         "status": "success",
         "incident_id": str(incident.id),
@@ -497,6 +523,19 @@ async def upload_collection_proof(
         proof_event_payload,
     )
 
+    # Notify Officers and Admins of Proof Submission
+    try:
+        driver_name = getattr(current_user, "email", None) or getattr(current_user, "full_name", None) or "Assigned Driver"
+        await NotificationService.notify_proof_submitted(
+            db=db,
+            incident=incident,
+            driver_name=driver_name,
+            proof_url=proof.image_url,
+            distance_meters=distance_meters,
+        )
+    except Exception as e:
+        logger.error(f"Error in notify_proof_submitted: {e}", exc_info=True)
+
     return proof
 
 
@@ -582,6 +621,17 @@ async def complete_collection(
             ),
         },
     )
+
+    # Notify Officers and Admins of Completion
+    try:
+        driver_name = getattr(current_user, "email", None) or getattr(current_user, "full_name", None) or "Assigned Driver"
+        await NotificationService.notify_collection_completed(
+            db=db,
+            incident=incident,
+            driver_name=driver_name,
+        )
+    except Exception as e:
+        logger.error(f"Error in notify_collection_completed: {e}", exc_info=True)
 
     return {
         "status": "success",

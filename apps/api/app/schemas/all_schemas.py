@@ -35,17 +35,91 @@ def _serialize_utc_iso(dt: Optional[datetime]) -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 
+import re
+from pydantic import field_validator
+
+def normalize_indian_phone_number(val: Optional[str]) -> str:
+    """
+    Validate and normalize Indian phone numbers.
+    Accepts formats: +91 9876543210, 9876543210, +919876543210, 98765 43210.
+    Normalizes to +91XXXXXXXXXX format.
+    """
+    if not val or not str(val).strip():
+        raise ValueError("Phone number is required.")
+
+    cleaned = str(val).strip()
+    digits = re.sub(r"\D", "", cleaned)
+
+    if len(digits) == 10:
+        if not digits[0] in "6789":
+            raise ValueError("Enter a valid 10-digit Indian mobile number.")
+        return f"+91{digits}"
+    elif len(digits) == 12 and digits.startswith("91"):
+        mobile_digits = digits[2:]
+        if not mobile_digits[0] in "6789":
+            raise ValueError("Enter a valid 10-digit Indian mobile number.")
+        return f"+91{mobile_digits}"
+    else:
+        raise ValueError("Enter a valid 10-digit Indian mobile number.")
+
+
+def validate_password_strength(password: str) -> str:
+    """
+    Validates that the password satisfies municipal security requirements:
+    - 8+ characters
+    - At least 1 uppercase letter
+    - At least 1 lowercase letter
+    - At least 1 number
+    - At least 1 special character
+    """
+    if not password or len(password) < 8:
+        raise ValueError("Password must be at least 8 characters long.")
+    if not re.search(r"[A-Z]", password):
+        raise ValueError("Password must contain at least 1 uppercase letter.")
+    if not re.search(r"[a-z]", password):
+        raise ValueError("Password must contain at least 1 lowercase letter.")
+    if not re.search(r"[0-9]", password):
+        raise ValueError("Password must contain at least 1 number.")
+    if not re.search(r"[!@#$%^&*(),.?\":{}|<>\-_+=\[\]\\/'`~;]", password):
+        raise ValueError("Password must contain at least 1 special character.")
+    return password
+
+
 class UserRegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)
     full_name: str = Field(min_length=2, max_length=255)
-    phone_number: Optional[str] = Field(None, max_length=30)
+    phone_number: str = Field(..., min_length=10, max_length=30)
     role: UserRole = UserRole.CITIZEN
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_email(cls, v: Optional[str]) -> str:
+        if v and isinstance(v, str):
+            return v.strip().lower()
+        return str(v) if v is not None else ""
+
+    @field_validator("phone_number", mode="before")
+    @classmethod
+    def validate_phone(cls, v: Optional[str]) -> str:
+        return normalize_indian_phone_number(v)
+
+    @field_validator("password")
+    @classmethod
+    def validate_pwd(cls, v: str) -> str:
+        return validate_password_strength(v)
 
 
 class UserLoginRequest(BaseModel):
     email: EmailStr
     password: str
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_email(cls, v: Optional[str]) -> str:
+        if v and isinstance(v, str):
+            return v.strip().lower()
+        return str(v) if v is not None else ""
 
 
 class TokenResponse(BaseModel):
@@ -278,12 +352,38 @@ class NotificationRead(BaseModel):
     title: str
     message: str
     notification_type: str
+    priority: Optional[str] = None
+    incident_id: Optional[uuid.UUID] = None
+    vehicle_id: Optional[uuid.UUID] = None
+    recipient_role: Optional[str] = None
+    action_url: Optional[str] = None
     is_read: bool
+    read_at: Optional[datetime] = None
+    metadata_json: Optional[dict] = None
     created_at: datetime
+    incident_code: Optional[str] = None
 
     @field_serializer("created_at")
     def serialize_notification_dt(self, dt: datetime) -> str:
         return _serialize_utc_iso(dt) or ""
+
+    @field_serializer("read_at")
+    def serialize_read_at_dt(self, dt: Optional[datetime]) -> Optional[str]:
+        return _serialize_utc_iso(dt) if dt else None
+
+
+class NotificationUnreadCountResponse(BaseModel):
+    count: int
+
+
+class NotificationMarkReadRequest(BaseModel):
+    notification_id: Optional[uuid.UUID] = None
+
+
+class NotificationListResponse(BaseModel):
+    unread_count: int
+    total_count: int
+    items: List[NotificationRead]
 
 
 class WasteAnalysisResult(BaseModel):
@@ -397,6 +497,8 @@ class DriverAssignmentRead(BaseModel):
     cluster_image_urls: List[str] = Field(default_factory=list)
     citizen_image_urls: List[str] = Field(default_factory=list)
     proof_image_urls: List[str] = Field(default_factory=list)
+    citizen_name: Optional[str] = None
+    citizen_phone: Optional[str] = None
 
     @field_serializer("assigned_at", "created_at", "updated_at", check_fields=False)
     def serialize_assignment_dt(self, dt: datetime) -> str:

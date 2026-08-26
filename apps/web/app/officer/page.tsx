@@ -50,6 +50,7 @@ import {
 import Link from "next/link";
 
 import { useAuth } from "@/lib/auth-context";
+import NotificationCenter from "@/components/notifications/NotificationCenter";
 import { EvidenceImage } from "@/components/ui/EvidenceImage";
 import { resolveImageUrl } from "@/lib/utils/imageUtils";
 import { formatRelativeTime, getElapsedMinutes, parseUtcDate } from "@/app/lib/timeAgo";
@@ -177,7 +178,7 @@ interface CitizenReportDetail {
   rawReportId?: string;
   incidentId: string;
   rawIncidentId?: string;
-
+  status?: string;
   title?: string;
   reporterName: string;
 
@@ -762,8 +763,11 @@ export default function OfficerPage() {
     if (!rawIncId) return;
     setIsLoadingExecution(true);
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-      const res = await fetch(`${apiUrl}/api/v1/incidents/${rawIncId}/driver-execution`, {
+      const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/$/, "");
+      const url = `${apiUrl}/api/v1/incidents/${rawIncId}/driver-execution`;
+      console.debug("Fetching driver execution details", { url, rawIncId });
+
+      const res = await fetch(url, {
         headers: getAuthHeaders(),
       });
       if (res.ok) {
@@ -772,7 +776,8 @@ export default function OfficerPage() {
       } else {
         setDriverExecution(null);
       }
-    } catch {
+    } catch (err) {
+      console.error("Failed to fetch driver execution:", err);
       setDriverExecution(null);
     } finally {
       setIsLoadingExecution(false);
@@ -780,11 +785,24 @@ export default function OfficerPage() {
   }, [getAuthHeaders]);
 
   const handleVerifyDriverProof = async () => {
-    if (!selectedReportDetail?.rawIncidentId) return;
+    const rawIncId = selectedReportDetail?.rawIncidentId;
+    if (!rawIncId) {
+      console.error("Unable to verify proof: incident ID is missing.");
+      setSuccessToast("⚠️ Unable to verify proof: incident ID is missing.");
+      return;
+    }
+
     setIsSubmittingVerification(true);
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-      const res = await fetch(`${apiUrl}/api/v1/incidents/${selectedReportDetail.rawIncidentId}/verify-proof`, {
+      const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/$/, "");
+      const url = `${apiUrl}/api/v1/incidents/${rawIncId}/verify-proof`;
+
+      console.debug("Verifying driver proof", {
+        url,
+        incidentId: rawIncId,
+      });
+
+      const res = await fetch(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -792,26 +810,62 @@ export default function OfficerPage() {
         },
         body: JSON.stringify({ notes: verifyNotes }),
       });
-      if (res.ok) {
-        setSuccessToast("✅ Driver Proof-of-Work verified! Incident marked RESOLVED.");
-        setIsVerifyModalOpen(false);
-        setVerifyNotes("");
-        void fetchDriverExecution(selectedReportDetail.rawIncidentId);
-        void fetchBackendData();
+
+      if (!res.ok) {
+        const errorText = await res.text().catch(() => "");
+        let errorDetail = errorText;
+        try {
+          const parsed = JSON.parse(errorText);
+          if (parsed.detail) {
+            errorDetail = typeof parsed.detail === "string" ? parsed.detail : JSON.stringify(parsed.detail);
+          }
+        } catch {}
+        throw new Error(`Proof verification failed (${res.status}): ${errorDetail || res.statusText}`);
       }
-    } catch (e) {
-      console.error(e);
+
+      await res.json().catch(() => null);
+
+      setSuccessToast("✅ Driver Proof-of-Work verified! Incident marked RESOLVED.");
+      setIsVerifyModalOpen(false);
+      setVerifyNotes("");
+
+      if (selectedReportDetail) {
+        setSelectedReportDetail({
+          ...selectedReportDetail,
+          status: "COMPLETED" as any,
+        });
+      }
+
+      void fetchDriverExecution(rawIncId);
+      void fetchBackendData();
+    } catch (e: unknown) {
+      console.error("Failed to verify driver proof:", e);
+      const errMsg = e instanceof Error ? e.message : "Proof verification failed";
+      setSuccessToast(`❌ ${errMsg}`);
     } finally {
       setIsSubmittingVerification(false);
     }
   };
 
   const handleRejectDriverProof = async () => {
-    if (!selectedReportDetail?.rawIncidentId) return;
+    const rawIncId = selectedReportDetail?.rawIncidentId;
+    if (!rawIncId) {
+      console.error("Unable to reject proof: incident ID is missing.");
+      setSuccessToast("⚠️ Unable to reject proof: incident ID is missing.");
+      return;
+    }
+
     setIsSubmittingVerification(true);
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-      const res = await fetch(`${apiUrl}/api/v1/incidents/${selectedReportDetail.rawIncidentId}/reject-proof`, {
+      const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/$/, "");
+      const url = `${apiUrl}/api/v1/incidents/${rawIncId}/reject-proof`;
+
+      console.debug("Rejecting driver proof", {
+        url,
+        incidentId: rawIncId,
+      });
+
+      const res = await fetch(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -819,15 +873,29 @@ export default function OfficerPage() {
         },
         body: JSON.stringify({ reason: rejectReason, notes: rejectNotes }),
       });
-      if (res.ok) {
-        setSuccessToast("⚠️ Proof rejected. Driver notified to retake proof.");
-        setIsRejectModalOpen(false);
-        setRejectNotes("");
-        void fetchDriverExecution(selectedReportDetail.rawIncidentId);
-        void fetchBackendData();
+
+      if (!res.ok) {
+        const errorText = await res.text().catch(() => "");
+        let errorDetail = errorText;
+        try {
+          const parsed = JSON.parse(errorText);
+          if (parsed.detail) {
+            errorDetail = typeof parsed.detail === "string" ? parsed.detail : JSON.stringify(parsed.detail);
+          }
+        } catch {}
+        throw new Error(`Proof rejection failed (${res.status}): ${errorDetail || res.statusText}`);
       }
-    } catch (e) {
-      console.error(e);
+
+      setSuccessToast("⚠️ Proof rejected. Driver notified to retake proof.");
+      setIsRejectModalOpen(false);
+      setRejectNotes("");
+
+      void fetchDriverExecution(rawIncId);
+      void fetchBackendData();
+    } catch (e: unknown) {
+      console.error("Failed to reject driver proof:", e);
+      const errMsg = e instanceof Error ? e.message : "Proof rejection failed";
+      setSuccessToast(`❌ ${errMsg}`);
     } finally {
       setIsSubmittingVerification(false);
     }
@@ -842,17 +910,21 @@ export default function OfficerPage() {
     
     if (reports.length > 0) {
       const rep = reports[0];
-      setSelectedReportDetail(rep);
+      const validRawId = rep.rawIncidentId || rawIncId;
+      setSelectedReportDetail({
+        ...rep,
+        rawIncidentId: validRawId,
+      });
       setReportDrawerOpen(true);
       setOfficerActionNote("");
       setManualSeverity("DEFAULT");
       setManualTruck("AUTO");
-      void fetchDriverExecution(rep.rawIncidentId || rawIncId);
+      void fetchDriverExecution(validRawId);
       
       // Auto-transition status from REPORTED -> UNDER_REVIEW in PostgreSQL when inspected
-      if (rep.rawIncidentId) {
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-        fetch(`${apiUrl}/api/v1/reports/${rep.rawIncidentId}`, {
+      if (validRawId) {
+        const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/$/, "");
+        fetch(`${apiUrl}/api/v1/reports/${validRawId}`, {
           method: "PATCH",
           headers: {
             "Content-Type": "application/json",
@@ -1367,7 +1439,20 @@ export default function OfficerPage() {
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
+        <div className="flex items-center gap-3 flex-wrap">
+          {/* Notification Center */}
+          <NotificationCenter
+            apiUrl={process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}
+            getAuthHeaders={getAuthHeaders}
+            onSelectIncident={(incId) => {
+              const matching = incidents.find((i) => i.rawId === incId || i.id === incId);
+              if (matching) {
+                setSelectedIncident(matching);
+              }
+            }}
+            onRefreshData={() => void fetchBackendData()}
+          />
+
           {/* User Profile Badge & Logout */}
           <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-sm">
             <User className="w-3.5 h-3.5 text-slate-500" />
@@ -2346,9 +2431,10 @@ export default function OfficerPage() {
                         src={photo}
                         alt={`Report ${selectedReportDetail.reportId} photo ${i + 1}`}
                         variant="evidence"
-                        objectFit="contain"
+                        aspectRatio="4/3"
+                        objectFit="cover"
                         badge={
-                          <span className="px-2 py-0.5 rounded bg-black/70 text-white text-[9px] font-bold">
+                          <span className="px-2 py-0.5 rounded bg-slate-900/80 text-white text-[9px] font-bold backdrop-blur-xs">
                             Photo {i + 1} of {selectedReportDetail.photos.length}
                           </span>
                         }
@@ -2619,7 +2705,8 @@ export default function OfficerPage() {
                         src={selectedReportDetail.photos?.[0]}
                         alt="Before cleaning citizen report photo"
                         variant="evidence"
-                        objectFit="contain"
+                        aspectRatio="4/3"
+                        objectFit="cover"
                         badge={
                           selectedReportDetail.photos.length > 1 ? (
                             <span className="px-2 py-0.5 rounded bg-black/70 text-white text-[9px] font-bold">
@@ -2645,7 +2732,8 @@ export default function OfficerPage() {
                         src={driverExecution?.proof?.image_url}
                         alt="After cleaning driver proof of work photo"
                         variant="evidence"
-                        objectFit="contain"
+                        aspectRatio="4/3"
+                        objectFit="cover"
                         badge={
                           driverExecution?.proof ? (
                             <span className="px-2 py-0.5 rounded bg-emerald-950/90 text-emerald-300 border border-emerald-500/40 text-[9px] font-bold flex items-center gap-1 shadow-xs">
@@ -2929,7 +3017,18 @@ export default function OfficerPage() {
               <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 text-xs space-y-1">
                 <p className="text-slate-500 font-medium">Incident: <span className="font-bold text-slate-900">{driverExecution?.incident_code || selectedReportDetail?.incidentId}</span></p>
                 <p className="text-slate-500 font-medium">Driver: <span className="font-bold text-slate-900">{driverExecution?.driver?.name || "Vikram Patel"}</span></p>
-                <p className="text-slate-500 font-medium">GPS Accuracy: <span className="font-bold text-emerald-700">{driverExecution?.proof?.distance_meters ?? 15}m from site (Verified)</span></p>
+                <p className="text-slate-500 font-medium">
+                  Distance from Site:{" "}
+                  <span className="font-bold text-emerald-700">
+                    {driverExecution?.proof?.distance_meters !== null && driverExecution?.proof?.distance_meters !== undefined
+                      ? `${driverExecution.proof.distance_meters}m`
+                      : "On-site"}
+                    {" "}
+                    {driverExecution?.proof?.accuracy !== null && driverExecution?.proof?.accuracy !== undefined
+                      ? `(±${driverExecution.proof.accuracy}m GPS precision)`
+                      : "(Proximity Verified)"}
+                  </span>
+                </p>
               </div>
 
               <div>

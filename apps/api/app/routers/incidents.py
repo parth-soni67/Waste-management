@@ -22,6 +22,7 @@ from app.core.security import (
     get_optional_user,
     require_role,
 )
+from app.services.notification_service import NotificationService
 from app.models.entities import (
     Incident,
     IncidentStatus,
@@ -710,6 +711,23 @@ async def update_incident(
     except Exception:
         pass
 
+    # Trigger Driver Notification if assigned
+    if inc.assigned_driver_id and (
+        payload.assigned_vehicle_id is not None
+        or payload.assigned_driver_id is not None
+        or payload.status == IncidentStatus.ASSIGNED
+    ):
+        try:
+            plate = assigned_vehicle.plate_number if assigned_vehicle else None
+            await NotificationService.notify_incident_assignment(
+                db=db,
+                incident=inc,
+                driver_id=inc.assigned_driver_id,
+                vehicle_plate=plate,
+            )
+        except Exception as e:
+            pass
+
     return inc
 
 
@@ -733,11 +751,47 @@ def _haversine_distance_meters(
     return r * c
 
 
+async def _get_incident_by_id_or_code(
+    db: AsyncSession,
+    incident_id_param: str,
+    options: Optional[list] = None,
+) -> Optional[Incident]:
+    """
+    Look up an Incident by full UUID or code prefix (e.g., WW-32BC8B52 or 32BC8B52).
+    """
+    clean_id = str(incident_id_param).strip()
+    if clean_id.upper().startswith(("WW-", "INC-", "WM-")):
+        clean_id = clean_id.split("-", 1)[1]
+
+    # 1. Try UUID match
+    try:
+        uuid_obj = uuid.UUID(clean_id)
+        stmt = select(Incident).where(Incident.id == uuid_obj)
+        if options:
+            stmt = stmt.options(*options)
+        res = await db.execute(stmt)
+        inc = res.scalar_one_or_none()
+        if inc:
+            return inc
+    except ValueError:
+        pass
+
+    # 2. Try prefix match on string representation of UUID
+    from sqlalchemy import String, cast
+    stmt_prefix = select(Incident).where(
+        cast(Incident.id, String).ilike(f"{clean_id}%")
+    )
+    if options:
+        stmt_prefix = stmt_prefix.options(*options)
+    res_prefix = await db.execute(stmt_prefix)
+    return res_prefix.scalars().first()
+
+
 @incidents_router.get(
     "/{incident_id}/driver-execution", response_model=DriverExecutionResponse
 )
 async def get_driver_execution_details(
-    incident_id: uuid.UUID,
+    incident_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
 ):
@@ -745,18 +799,16 @@ async def get_driver_execution_details(
     Retrieve comprehensive driver dispatch, live execution, proof-of-work, and audit timeline
     for an incident. Accessible to Officers, Drivers, and Admins.
     """
-    stmt = (
-        select(Incident)
-        .options(
+    inc = await _get_incident_by_id_or_code(
+        db,
+        incident_id,
+        options=[
             selectinload(Incident.assigned_driver),
             selectinload(Incident.assigned_vehicle),
             selectinload(Incident.proofs),
             selectinload(Incident.reports),
-        )
-        .where(Incident.id == incident_id)
+        ],
     )
-    res = await db.execute(stmt)
-    inc = res.scalar_one_or_none()
 
     if not inc:
         raise HTTPException(
@@ -943,7 +995,7 @@ async def get_driver_execution_details(
 
 @incidents_router.post("/{incident_id}/verify-proof")
 async def verify_incident_proof(
-    incident_id: uuid.UUID,
+    incident_id: str,
     payload: OfficerVerifyProofRequest,
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(
@@ -954,17 +1006,15 @@ async def verify_incident_proof(
     Officer confirms and verifies the driver's uploaded proof of work.
     Transitions incident status to RESOLVED and broadcasts realtime confirmation.
     """
-    stmt = (
-        select(Incident)
-        .options(
+    inc = await _get_incident_by_id_or_code(
+        db,
+        incident_id,
+        options=[
             selectinload(Incident.proofs),
             selectinload(Incident.assigned_driver),
             selectinload(Incident.reports),
-        )
-        .where(Incident.id == incident_id)
+        ],
     )
-    res = await db.execute(stmt)
-    inc = res.scalar_one_or_none()
 
     if not inc:
         raise HTTPException(
@@ -1017,6 +1067,18 @@ async def verify_incident_proof(
     except Exception:
         pass
 
+    # Notify Driver of Verification
+    if inc.assigned_driver_id:
+        try:
+            await NotificationService.notify_proof_verified(
+                db=db,
+                driver_id=inc.assigned_driver_id,
+                incident=inc,
+                notes=payload.notes,
+            )
+        except Exception:
+            pass
+
     return {
         "success": True,
         "incident_id": str(inc.id),
@@ -1029,7 +1091,7 @@ async def verify_incident_proof(
 
 @incidents_router.post("/{incident_id}/reject-proof")
 async def reject_incident_proof(
-    incident_id: uuid.UUID,
+    incident_id: str,
     payload: OfficerRejectProofRequest,
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(
@@ -1040,17 +1102,15 @@ async def reject_incident_proof(
     Officer rejects the driver's uploaded proof photo with mandatory reason.
     Transitions incident status back to IN_PROGRESS so the driver can retake and re-upload.
     """
-    stmt = (
-        select(Incident)
-        .options(
+    inc = await _get_incident_by_id_or_code(
+        db,
+        incident_id,
+        options=[
             selectinload(Incident.proofs),
             selectinload(Incident.assigned_driver),
             selectinload(Incident.reports),
-        )
-        .where(Incident.id == incident_id)
+        ],
     )
-    res = await db.execute(stmt)
-    inc = res.scalar_one_or_none()
 
     if not inc:
         raise HTTPException(
@@ -1102,6 +1162,19 @@ async def reject_incident_proof(
         )
     except Exception:
         pass
+
+    # Notify Driver of Rejection
+    if inc.assigned_driver_id:
+        try:
+            await NotificationService.notify_proof_rejected(
+                db=db,
+                driver_id=inc.assigned_driver_id,
+                incident=inc,
+                reason=payload.reason,
+                notes=payload.notes,
+            )
+        except Exception:
+            pass
 
     return {
         "success": True,
