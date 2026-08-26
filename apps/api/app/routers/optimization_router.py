@@ -7,8 +7,6 @@ import logging
 import uuid
 from typing import Any, Dict, List
 
-logger = logging.getLogger(__name__)
-
 from fastapi import (
     APIRouter,
     Depends,
@@ -36,6 +34,7 @@ from app.services.vehicle_assignment_service import (
 )
 from app.ws.live_ws import ws_manager
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -153,7 +152,10 @@ async def simulate_p0_emergency(
     # Persist and notify active Drivers of route update
     try:
         from app.models.entities import User, UserRole
-        driver_stmt = select(User.id).where(User.role == UserRole.DRIVER, User.is_active.is_(True))
+
+        driver_stmt = select(User.id).where(
+            User.role == UserRole.DRIVER, User.is_active.is_(True)
+        )
         driver_res = await db.execute(driver_stmt)
         driver_ids = driver_res.scalars().all()
         for d_id in driver_ids:

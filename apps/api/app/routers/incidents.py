@@ -10,10 +10,9 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select, or_, cast, String
+from sqlalchemy import String, cast, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-
 
 from app.core.db import get_db
 from app.core.security import (
@@ -22,7 +21,6 @@ from app.core.security import (
     get_optional_user,
     require_role,
 )
-from app.services.notification_service import NotificationService
 from app.models.entities import (
     Incident,
     IncidentStatus,
@@ -47,8 +45,8 @@ from app.schemas.all_schemas import (
     ReportRead,
     ReportUpdate,
 )
-
 from app.services.clustering_service import DuplicateClusteringService
+from app.services.notification_service import NotificationService
 from app.services.priority_engine import DynamicPriorityEngine
 from app.ws.live_ws import ws_manager
 
@@ -170,20 +168,34 @@ async def create_report(
 
 def _get_effective_report_status(report: Report) -> IncidentStatus:
     status_val = report.status
-    if status_val in (IncidentStatus.VERIFIED, IncidentStatus.COMPLETED, IncidentStatus.CLOSED):
+    if status_val in (
+        IncidentStatus.VERIFIED,
+        IncidentStatus.COMPLETED,
+        IncidentStatus.CLOSED,
+    ):
         return IncidentStatus.COMPLETED
     if status_val == IncidentStatus.REJECTED:
         return IncidentStatus.REJECTED
 
     if report.incident:
         inc_status = report.incident.status
-        if inc_status in (IncidentStatus.VERIFIED, IncidentStatus.COMPLETED, IncidentStatus.CLOSED):
+        if inc_status in (
+            IncidentStatus.VERIFIED,
+            IncidentStatus.COMPLETED,
+            IncidentStatus.CLOSED,
+        ):
             return IncidentStatus.COMPLETED
         elif inc_status == IncidentStatus.REJECTED:
             return IncidentStatus.REJECTED
-        elif inc_status == IncidentStatus.ASSIGNED and status_val == IncidentStatus.REPORTED:
+        elif (
+            inc_status == IncidentStatus.ASSIGNED
+            and status_val == IncidentStatus.REPORTED
+        ):
             return IncidentStatus.ASSIGNED
-        elif inc_status == IncidentStatus.UNDER_REVIEW and status_val == IncidentStatus.REPORTED:
+        elif (
+            inc_status == IncidentStatus.UNDER_REVIEW
+            and status_val == IncidentStatus.REPORTED
+        ):
             return IncidentStatus.UNDER_REVIEW
     return status_val
 
@@ -286,18 +298,24 @@ async def list_my_reports(
     return result_list
 
 
-async def _resolve_report_by_id_string(db: AsyncSession, raw_id: str) -> Optional[Report]:
+async def _resolve_report_by_id_string(
+    db: AsyncSession, raw_id: str
+) -> Optional[Report]:
     clean_id = raw_id.strip()
     for prefix in ("REP-", "WW-", "INC-", "WM-"):
         if clean_id.upper().startswith(prefix):
-            clean_id = clean_id[len(prefix):]
+            clean_id = clean_id[len(prefix) :]
     # Remove priority suffix if appended (e.g. B96C4EDDP2 or B96C4EDD-P2)
-    clean_id = re.sub(r'[-_]?P[0-4]$', '', clean_id, flags=re.IGNORECASE)
+    clean_id = re.sub(r"[-_]?P[0-4]$", "", clean_id, flags=re.IGNORECASE)
 
     # 1. Exact UUID match
     try:
         target_uuid = uuid.UUID(clean_id)
-        stmt = select(Report).options(selectinload(Report.incident)).where(Report.id == target_uuid)
+        stmt = (
+            select(Report)
+            .options(selectinload(Report.incident))
+            .where(Report.id == target_uuid)
+        )
         res = await db.execute(stmt)
         rep = res.scalar_one_or_none()
         if rep:
@@ -381,7 +399,9 @@ async def update_report_status(
     report_id: str,
     payload: ReportUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: TokenPayload = Depends(require_role(UserRole.OFFICER, UserRole.ADMIN, UserRole.DRIVER)),
+    current_user: TokenPayload = Depends(
+        require_role(UserRole.OFFICER, UserRole.ADMIN, UserRole.DRIVER)
+    ),
 ):
     """
     Officer updates citizen report status (REPORTED -> UNDER_REVIEW -> COMPLETED / REJECTED / ASSIGNED).
@@ -396,11 +416,20 @@ async def update_report_status(
 
     if payload.status is not None:
         raw_st = str(payload.status).upper()
-        if raw_st in ("COMPLETED", "APPROVED", "VERIFIED") or payload.status in (IncidentStatus.COMPLETED, IncidentStatus.VERIFIED):
+        if raw_st in ("COMPLETED", "APPROVED", "VERIFIED") or payload.status in (
+            IncidentStatus.COMPLETED,
+            IncidentStatus.VERIFIED,
+        ):
             target_st = IncidentStatus.COMPLETED
-        elif raw_st in ("REJECTED", "DUPLICATE") or payload.status == IncidentStatus.REJECTED:
+        elif (
+            raw_st in ("REJECTED", "DUPLICATE")
+            or payload.status == IncidentStatus.REJECTED
+        ):
             target_st = IncidentStatus.REJECTED
-        elif raw_st in ("UNDER_REVIEW", "ESCALATED") or payload.status == IncidentStatus.UNDER_REVIEW:
+        elif (
+            raw_st in ("UNDER_REVIEW", "ESCALATED")
+            or payload.status == IncidentStatus.UNDER_REVIEW
+        ):
             target_st = IncidentStatus.UNDER_REVIEW
         else:
             target_st = payload.status
@@ -408,13 +437,16 @@ async def update_report_status(
         report.status = target_st
         # Sync parent incident status if linked
         if report.incident:
-            if target_st in (IncidentStatus.COMPLETED, IncidentStatus.VERIFIED, IncidentStatus.CLOSED):
+            if target_st in (
+                IncidentStatus.COMPLETED,
+                IncidentStatus.VERIFIED,
+                IncidentStatus.CLOSED,
+            ):
                 report.incident.status = IncidentStatus.VERIFIED
             elif target_st == IncidentStatus.REJECTED:
                 report.incident.status = IncidentStatus.REJECTED
             elif target_st == IncidentStatus.ASSIGNED:
                 report.incident.status = IncidentStatus.ASSIGNED
-
 
     if payload.officer_notes:
         report.recommended_action = f"Officer Note: {payload.officer_notes}"
@@ -426,7 +458,11 @@ async def update_report_status(
     status_event = {
         "report_id": str(report.id),
         "incident_id": str(report.incident_id) if report.incident_id else None,
-        "status": report.status.value if hasattr(report.status, "value") else str(report.status),
+        "status": (
+            report.status.value
+            if hasattr(report.status, "value")
+            else str(report.status)
+        ),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     try:
@@ -457,7 +493,6 @@ async def update_report_status(
         "created_at": report.created_at,
     }
     return ReportRead(**r_dict)
-
 
 
 # ---------------------------------------------------------------------------
@@ -553,7 +588,11 @@ async def update_incident(
     ),
 ):
     """Officer updates incident priority, assignment, or status with PostgreSQL persistence."""
-    stmt = select(Incident).options(selectinload(Incident.reports)).where(Incident.id == incident_id)
+    stmt = (
+        select(Incident)
+        .options(selectinload(Incident.reports))
+        .where(Incident.id == incident_id)
+    )
     res = await db.execute(stmt)
     inc = res.scalar_one_or_none()
 
@@ -632,9 +671,17 @@ async def update_incident(
     if inc.reports and payload.status is not None:
         for rep in inc.reports:
             # Preserve already completed, verified, or rejected report statuses
-            if rep.status in (IncidentStatus.COMPLETED, IncidentStatus.VERIFIED, IncidentStatus.REJECTED):
+            if rep.status in (
+                IncidentStatus.COMPLETED,
+                IncidentStatus.VERIFIED,
+                IncidentStatus.REJECTED,
+            ):
                 continue
-            if payload.status in (IncidentStatus.COMPLETED, IncidentStatus.VERIFIED, IncidentStatus.CLOSED):
+            if payload.status in (
+                IncidentStatus.COMPLETED,
+                IncidentStatus.VERIFIED,
+                IncidentStatus.CLOSED,
+            ):
                 rep.status = IncidentStatus.COMPLETED
             elif payload.status == IncidentStatus.REJECTED:
                 rep.status = IncidentStatus.REJECTED
@@ -653,13 +700,16 @@ async def update_incident(
             "REPORT_STATUS_UPDATED",
             {
                 "incident_id": str(inc.id),
-                "status": inc.status.value if hasattr(inc.status, "value") else str(inc.status),
+                "status": (
+                    inc.status.value
+                    if hasattr(inc.status, "value")
+                    else str(inc.status)
+                ),
                 "updated_at": inc.updated_at.isoformat(),
             },
         )
     except Exception:
         pass
-
 
     # Broadcast events
     try:
@@ -725,7 +775,7 @@ async def update_incident(
                 driver_id=inc.assigned_driver_id,
                 vehicle_plate=plate,
             )
-        except Exception as e:
+        except Exception:
             pass
 
     return inc
@@ -778,6 +828,7 @@ async def _get_incident_by_id_or_code(
 
     # 2. Try prefix match on string representation of UUID
     from sqlalchemy import String, cast
+
     stmt_prefix = select(Incident).where(
         cast(Incident.id, String).ilike(f"{clean_id}%")
     )

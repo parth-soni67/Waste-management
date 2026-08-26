@@ -263,7 +263,7 @@ class MunicipalDecisionAgent:
                 answer_parts.append(
                     f"{i}. **{z['zone']}** — {z['incidents']} active incidents (avg {z['avg_priority']})"
                 )
-                citations.append(f"incidents.top_zones[{i-1}]")
+                citations.append(f"incidents.top_zones[{i - 1}]")
 
             if tomorrow:
                 answer_parts.append("\n**Tomorrow's Predicted Surges:**")
@@ -292,7 +292,7 @@ class MunicipalDecisionAgent:
             ]
             for h in hot_data["critical_zones"]:
                 answer_parts.append(
-                    f"- **{h['zone']}** [{h['risk_level']}] — {int(h['probability']*100)}% probability, "
+                    f"- **{h['zone']}** [{h['risk_level']}] — {int(h['probability'] * 100)}% probability, "
                     f"peak window {h['peak_window']}. Reason: {h['reason']}"
                 )
                 citations.append(f"hotspots.critical_zones.{h['zone']}")

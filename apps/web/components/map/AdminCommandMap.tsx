@@ -15,10 +15,8 @@ import {
   Truck,
   AlertTriangle,
   Hospital,
-  CheckCircle2,
   Pause,
   Play,
-  RotateCw,
   X,
 } from "lucide-react";
 import { getMapStyle } from "@/lib/services/mapboxService";

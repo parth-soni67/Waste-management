@@ -148,11 +148,12 @@ async def get_driver_assignments(
         if created_dt.tzinfo is None:
             created_dt = created_dt.replace(tzinfo=timezone.utc)
         elapsed_mins = int((now - created_dt).total_seconds() // 60)
-        target_sla = (
-            30
-            if inc.priority == PriorityLevel.P0
-            else 120 if inc.priority == PriorityLevel.P1 else 240
-        )
+        if inc.priority == PriorityLevel.P0:
+            target_sla = 30
+        elif inc.priority == PriorityLevel.P1:
+            target_sla = 120
+        else:
+            target_sla = 240
         sla_left = max(0, target_sla - elapsed_mins)
 
         # Separate primary report evidence from clustered report evidence and extract citizen contact
@@ -382,7 +383,11 @@ async def start_collection(
 
     # Notify Officers and Admins
     try:
-        driver_name = getattr(current_user, "email", None) or getattr(current_user, "full_name", None) or "Assigned Driver"
+        driver_name = (
+            getattr(current_user, "email", None)
+            or getattr(current_user, "full_name", None)
+            or "Assigned Driver"
+        )
         await NotificationService.notify_collection_started(
             db=db,
             incident=incident,
@@ -525,7 +530,11 @@ async def upload_collection_proof(
 
     # Notify Officers and Admins of Proof Submission
     try:
-        driver_name = getattr(current_user, "email", None) or getattr(current_user, "full_name", None) or "Assigned Driver"
+        driver_name = (
+            getattr(current_user, "email", None)
+            or getattr(current_user, "full_name", None)
+            or "Assigned Driver"
+        )
         await NotificationService.notify_proof_submitted(
             db=db,
             incident=incident,
@@ -624,7 +633,11 @@ async def complete_collection(
 
     # Notify Officers and Admins of Completion
     try:
-        driver_name = getattr(current_user, "email", None) or getattr(current_user, "full_name", None) or "Assigned Driver"
+        driver_name = (
+            getattr(current_user, "email", None)
+            or getattr(current_user, "full_name", None)
+            or "Assigned Driver"
+        )
         await NotificationService.notify_collection_completed(
             db=db,
             incident=incident,

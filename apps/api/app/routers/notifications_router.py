@@ -7,7 +7,6 @@ Provides unread counters, notification feeds, and read-state management.
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import desc, func, select, update
@@ -15,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.security import TokenPayload, get_current_user
-from app.models.entities import Incident, Notification, UserRole
+from app.models.entities import Notification
 from app.schemas.all_schemas import (
     NotificationListResponse,
     NotificationRead,
@@ -29,8 +28,12 @@ router = APIRouter(prefix="/notifications", tags=["Notifications"])
 
 @router.get("", response_model=NotificationListResponse)
 async def list_notifications(
-    unread_only: bool = Query(default=False, description="Filter only unread notifications"),
-    limit: int = Query(default=50, ge=1, le=100, description="Max number of items to return"),
+    unread_only: bool = Query(
+        default=False, description="Filter only unread notifications"
+    ),
+    limit: int = Query(
+        default=50, ge=1, le=100, description="Max number of items to return"
+    ),
     offset: int = Query(default=0, ge=0, description="Pagination offset"),
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
@@ -42,9 +45,8 @@ async def list_notifications(
     user_uuid = uuid.UUID(current_user.sub)
 
     # 1. Unread count query
-    unread_stmt = (
-        select(func.count(Notification.id))
-        .where(Notification.user_id == user_uuid, Notification.is_read.is_(False))
+    unread_stmt = select(func.count(Notification.id)).where(
+        Notification.user_id == user_uuid, Notification.is_read.is_(False)
     )
     unread_res = await db.execute(unread_stmt)
     unread_count = unread_res.scalar() or 0
@@ -60,7 +62,9 @@ async def list_notifications(
     total_count = count_res.scalar() or 0
 
     # Fetch items sorted newest first
-    items_stmt = base_stmt.order_by(desc(Notification.created_at)).offset(offset).limit(limit)
+    items_stmt = (
+        base_stmt.order_by(desc(Notification.created_at)).offset(offset).limit(limit)
+    )
     items_res = await db.execute(items_stmt)
     notifications = items_res.scalars().all()
 
@@ -103,9 +107,8 @@ async def get_unread_notification_count(
     Quick count of unread notifications for badge rendering.
     """
     user_uuid = uuid.UUID(current_user.sub)
-    stmt = (
-        select(func.count(Notification.id))
-        .where(Notification.user_id == user_uuid, Notification.is_read.is_(False))
+    stmt = select(func.count(Notification.id)).where(
+        Notification.user_id == user_uuid, Notification.is_read.is_(False)
     )
     res = await db.execute(stmt)
     count = res.scalar() or 0

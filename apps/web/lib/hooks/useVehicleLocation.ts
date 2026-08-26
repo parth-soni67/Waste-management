@@ -26,7 +26,7 @@ export function useVehicleLocation(
     accuracy: null,
     speed: 0,
     heading: 0,
-    timestamp: Date.now(),
+    timestamp: 0,
     status: "acquiring",
   });
 
@@ -92,13 +92,39 @@ export function useVehicleLocation(
   }, [syncBackendLocation]);
 
   useEffect(() => {
-    refreshLocation();
-
     if (typeof window === "undefined" || !("geolocation" in navigator)) {
-      setTelemetry((prev) => ({ ...prev, status: "fallback" }));
-      return;
+      const timer = setTimeout(() => {
+        setTelemetry((prev) => ({ ...prev, status: "fallback" }));
+      }, 0);
+      return () => clearTimeout(timer);
     }
 
+    // Initial position fetch via async browser API callback
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const { latitude, longitude, accuracy, heading, speed } = pos.coords;
+        const speedKmH = speed !== null ? Math.round(speed * 3.6) : 0;
+        setTelemetry({
+          latitude,
+          longitude,
+          accuracy,
+          speed: speedKmH,
+          heading: heading || 0,
+          timestamp: pos.timestamp,
+          status: "active",
+        });
+        void syncBackendLocation(latitude, longitude, accuracy, heading, speedKmH);
+      },
+      () => {
+        setTelemetry((prev) => ({
+          ...prev,
+          status: prev.status === "active" ? "active" : "fallback",
+        }));
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+
+    // Continuous watch position subscription
     const watchId = navigator.geolocation.watchPosition(
       (pos) => {
         const { latitude, longitude, accuracy, heading, speed } = pos.coords;
@@ -138,7 +164,7 @@ export function useVehicleLocation(
     return () => {
       navigator.geolocation.clearWatch(watchId);
     };
-  }, [refreshLocation, syncBackendLocation]);
+  }, [syncBackendLocation]);
 
   return {
     telemetry,

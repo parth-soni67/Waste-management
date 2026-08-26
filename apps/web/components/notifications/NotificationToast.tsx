@@ -3,7 +3,6 @@
 import React, { useEffect } from "react";
 import {
   AlertOctagon,
-  AlertTriangle,
   CheckCircle2,
   X,
   ArrowRight,

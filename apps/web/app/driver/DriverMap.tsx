@@ -441,7 +441,7 @@ export default function DriverMap({
         <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
         <span>Municipal Navigation Map</span>
         <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-          🟢 Optimized Route ({routeProvider || "Mapbox"})
+          🟢 {routeStatus.replace(/_/g, " ")} ({routeProvider || "Mapbox"})
         </span>
       </div>
 

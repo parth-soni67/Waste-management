@@ -45,25 +45,13 @@ export function EvidenceImage({
   const resolvedUrl = resolveImageUrl(src);
   const isUrlValid = Boolean(resolvedUrl && resolvedUrl.trim().length > 0);
 
-  // Synchronously initialize state based on URL validity to prevent empty src renders
-  const [isLoading, setIsLoading] = useState<boolean>(isUrlValid);
-  const [hasError, setHasError] = useState<boolean>(!isUrlValid);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [hasError, setHasError] = useState<boolean>(false);
   const [isLightboxOpen, setIsLightboxOpen] = useState<boolean>(false);
   const [retryCount, setRetryCount] = useState<number>(0);
 
   // Default object-fit: "cover" for clean container fill, "contain" if explicitly requested
-  const finalObjectFit = objectFit ?? "cover";
-
-  // Reset state when src or retry changes
-  useEffect(() => {
-    if (!isUrlValid) {
-      setHasError(true);
-      setIsLoading(false);
-    } else {
-      setHasError(false);
-      setIsLoading(true);
-    }
-  }, [resolvedUrl, isUrlValid, retryCount]);
+  const finalObjectFit = objectFit ?? (variant === "thumbnail" ? "cover" : "cover");
 
   // Handle ESC key to close lightbox
   useEffect(() => {
@@ -156,10 +144,15 @@ export function EvidenceImage({
           /* ACTUAL IMAGE — ONLY RENDERED WHEN isUrlValid IS STRICTLY TRUE */
           isUrlValid && (
             <div className="relative w-full h-full flex items-center justify-center bg-slate-900">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
+                key={`${resolvedUrl}-${retryCount}`}
                 src={resolvedUrl}
                 alt={alt}
-                onLoad={() => setIsLoading(false)}
+                onLoad={() => {
+                  setIsLoading(false);
+                  setHasError(false);
+                }}
                 onError={() => {
                   setIsLoading(false);
                   setHasError(true);
@@ -233,6 +226,7 @@ export function EvidenceImage({
 
             {/* Modal Photo Display Area */}
             <div className="p-4 flex-1 flex items-center justify-center bg-black min-h-[300px] overflow-hidden">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={resolvedUrl}
                 alt={alt}

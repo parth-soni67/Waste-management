@@ -18,7 +18,6 @@ import {
   Upload,
   Check,
   CheckCircle2,
-  Layers,
   Phone,
   PhoneCall,
   Copy,
@@ -125,17 +124,6 @@ function formatDistanceDisplay(meters: number | null): string {
     return `${Math.round(meters)} m`;
   }
   return `${(meters / 1000).toFixed(2)} km`;
-}
-
-function formatEtaDisplay(minutes: number | null): string {
-  if (minutes === null || isNaN(minutes)) return "Calculating...";
-  if (minutes < 1) return "< 1 min";
-  if (minutes >= 60) {
-    const hrs = Math.floor(minutes / 60);
-    const mins = minutes % 60;
-    return `${hrs}h ${mins}m`;
-  }
-  return `${minutes} min`;
 }
 
 export default function DriverPage() {
@@ -466,7 +454,7 @@ export default function DriverPage() {
       clearTimeout(reconnectTimeout);
       if (ws) ws.close();
     };
-  }, [apiUrl, fetchAssignments]);
+  }, [apiUrl, fetchAssignments, user?.id]);
 
   // 5. Active Incident Details
   const currentAssignment = assignments.find((a) => a.incident_id === activeIncidentId) || (assignments.length > 0 ? assignments[0] : null);

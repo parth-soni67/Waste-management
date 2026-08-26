@@ -10,16 +10,11 @@ import {
   MapPin,
   Clock,
   ArrowLeft,
-  Filter,
   CheckCircle2,
-  TrendingUp,
   Flame,
-  Layers,
-  ChevronRight,
   RefreshCw,
   Users,
   Zap,
-  Route,
   MessageSquare,
   Send,
   BarChart3,
@@ -29,15 +24,12 @@ import {
   UserPlus,
   X,
   Check,
-  Phone,
-  Fuel,
   Image as ImageIcon,
   FileText,
   Eye,
   ArrowUpRight,
   ThumbsDown,
   Copy,
-  ChevronDown,
   User,
   Calendar,
   Tag,
@@ -254,7 +246,6 @@ export default function OfficerPage() {
   const [filterPriority, setFilterPriority] = useState<string>("ALL");
   const [filterTime, setFilterTime] = useState<string>("LATEST");
   const [filterZone, setFilterZone] = useState<string>("ALL");
-  const [showHotspots, setShowHotspots] = useState<boolean>(true);
   const [isRecomputing, setIsRecomputing] = useState(false);
   const [recomputeAlert, setRecomputeAlert] = useState<string | null>(null);
   const [selectedIncident, setSelectedIncident] = useState<IncidentItem | null>(null);
@@ -392,54 +383,6 @@ export default function OfficerPage() {
 
   // Real incidents state (loaded from Supabase backend GET /api/v1/incidents)
   const [incidents, setIncidents] = useState<IncidentItem[]>([]);
-
-  const mapPoints: MapPoint[] = useMemo(() => {
-    const points: MapPoint[] = incidents.map((inc) => ({
-      id: inc.id,
-      lat: inc.lat,
-      lng: inc.lng,
-      title: inc.title,
-      priority: inc.priority,
-      type: "incident" as const,
-    }));
-
-    // Add all fleet vehicles dynamically
-    vehicles.forEach((veh) => {
-      if (veh.status !== "MAINTENANCE") {
-        points.push({
-          id: veh.id,
-          lat: veh.lat,
-          lng: veh.lng,
-          title: `${veh.plate} (${veh.type} · Driver: ${veh.driver || "Unassigned"})`,
-          type: "vehicle" as const,
-        });
-      }
-    });
-
-    // Add Predicted Hotspots if layer toggled on
-    if (showHotspots) {
-      points.push(
-        {
-          id: "HOT-01",
-          lat: 23.045,
-          lng: 72.550,
-          title: "HOTSPOT: Sector 21 APMC (89% Risk)",
-          priority: "P0",
-          type: "hotspot" as const,
-        },
-        {
-          id: "HOT-02",
-          lat: 23.028,
-          lng: 72.574,
-          title: "HOTSPOT: Sector 11 Corridor (78% Risk)",
-          priority: "P1",
-          type: "hotspot" as const,
-        }
-      );
-    }
-
-    return points;
-  }, [incidents, vehicles, showHotspots]);
 
   // Real-time Supabase / PostgreSQL Incident & Report fetch
   const fetchBackendData = React.useCallback(async () => {
@@ -626,7 +569,7 @@ export default function OfficerPage() {
       id: v.id,
       plate: v.plate,
       type: v.type,
-      status: (v.status as any) || "AVAILABLE",
+      status: (v.status as "AVAILABLE" | "EN_ROUTE" | "COLLECTING" | "MAINTENANCE" | "OFFLINE") || "AVAILABLE",
       lat: v.lat || 23.025,
       lng: v.lng || 72.578,
       heading: 45,
@@ -832,7 +775,7 @@ export default function OfficerPage() {
       if (selectedReportDetail) {
         setSelectedReportDetail({
           ...selectedReportDetail,
-          status: "COMPLETED" as any,
+          status: "COMPLETED",
         });
       }
 
@@ -2977,6 +2920,7 @@ export default function OfficerPage() {
               </button>
             </div>
             <div className="p-4 flex items-center justify-center bg-black">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={getImageUrl(fullProofModalUrl)}
                 alt="Driver proof full resolution"

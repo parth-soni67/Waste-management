@@ -5,11 +5,19 @@ Strict input/output schemas for all API endpoints.
 Implements system_guide.md §3: dedicated schemas per direction (Create, Read, Update).
 """
 
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_serializer
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    EmailStr,
+    Field,
+    field_serializer,
+    field_validator,
+)
 
 from app.models.entities import (
     IncidentStatus,
@@ -35,9 +43,6 @@ def _serialize_utc_iso(dt: Optional[datetime]) -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 
-import re
-from pydantic import field_validator
-
 def normalize_indian_phone_number(val: Optional[str]) -> str:
     """
     Validate and normalize Indian phone numbers.
@@ -51,12 +56,12 @@ def normalize_indian_phone_number(val: Optional[str]) -> str:
     digits = re.sub(r"\D", "", cleaned)
 
     if len(digits) == 10:
-        if not digits[0] in "6789":
+        if digits[0] not in "6789":
             raise ValueError("Enter a valid 10-digit Indian mobile number.")
         return f"+91{digits}"
     elif len(digits) == 12 and digits.startswith("91"):
         mobile_digits = digits[2:]
-        if not mobile_digits[0] in "6789":
+        if mobile_digits[0] not in "6789":
             raise ValueError("Enter a valid 10-digit Indian mobile number.")
         return f"+91{mobile_digits}"
     else:
@@ -267,7 +272,6 @@ class ReportUpdate(BaseModel):
     status: Optional[IncidentStatus] = None
     officer_notes: Optional[str] = Field(None, max_length=1000)
     assigned_vehicle_id: Optional[uuid.UUID] = None
-
 
 
 # ---------------------------------------------------------------------------

@@ -9,16 +9,14 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import desc, func, select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.entities import (
     Incident,
     Notification,
-    PriorityLevel,
     User,
     UserRole,
-    Vehicle,
 )
 from app.ws.live_ws import ws_manager
 
@@ -94,7 +92,16 @@ class NotificationService:
     async def get_active_officer_ids(db: AsyncSession) -> List[uuid.UUID]:
         """Retrieve user IDs for all active Officers and Admins."""
         stmt = select(User.id).where(
-            User.role.in_([UserRole.OFFICER, UserRole.ADMIN, "officer", "admin", "OFFICER", "ADMIN"]),
+            User.role.in_(
+                [
+                    UserRole.OFFICER,
+                    UserRole.ADMIN,
+                    "officer",
+                    "admin",
+                    "OFFICER",
+                    "ADMIN",
+                ]
+            ),
         )
         res = await db.execute(stmt)
         ids = list(res.scalars().all())
@@ -146,9 +153,7 @@ class NotificationService:
         else:
             notif_type = "NEW_INCIDENT_ASSIGNED"
             title = "New Waste Incident Assigned"
-            message = (
-                f"A new {prio_str} waste incident ({inc_code}) has been assigned to your route at {incident.address_text or 'Municipal Sector'}."
-            )
+            message = f"A new {prio_str} waste incident ({inc_code}) has been assigned to your route at {incident.address_text or 'Municipal Sector'}."
 
         meta = {
             "incident_code": inc_code,
@@ -168,7 +173,11 @@ class NotificationService:
             priority=prio_str,
             incident_id=incident.id,
             vehicle_id=incident.assigned_vehicle_id,
-            recipient_role=UserRole.DRIVER.value if hasattr(UserRole.DRIVER, "value") else str(UserRole.DRIVER),
+            recipient_role=(
+                UserRole.DRIVER.value
+                if hasattr(UserRole.DRIVER, "value")
+                else str(UserRole.DRIVER)
+            ),
             action_url=f"/driver?incident={incident.id}",
             metadata_json=meta,
         )
@@ -199,7 +208,11 @@ class NotificationService:
             notification_type="ROUTE_UPDATED",
             priority="P2",
             vehicle_id=vehicle_id,
-            recipient_role=UserRole.DRIVER.value if hasattr(UserRole.DRIVER, "value") else str(UserRole.DRIVER),
+            recipient_role=(
+                UserRole.DRIVER.value
+                if hasattr(UserRole.DRIVER, "value")
+                else str(UserRole.DRIVER)
+            ),
             action_url="/driver",
             metadata_json={
                 "stop_count": stop_count,
@@ -235,7 +248,11 @@ class NotificationService:
             priority=prio_str,
             incident_id=incident.id,
             vehicle_id=incident.assigned_vehicle_id,
-            recipient_role=UserRole.DRIVER.value if hasattr(UserRole.DRIVER, "value") else str(UserRole.DRIVER),
+            recipient_role=(
+                UserRole.DRIVER.value
+                if hasattr(UserRole.DRIVER, "value")
+                else str(UserRole.DRIVER)
+            ),
             action_url=f"/driver?incident={incident.id}",
             metadata_json={
                 "incident_code": inc_code,
@@ -270,7 +287,11 @@ class NotificationService:
             priority="P1",
             incident_id=incident.id,
             vehicle_id=incident.assigned_vehicle_id,
-            recipient_role=UserRole.DRIVER.value if hasattr(UserRole.DRIVER, "value") else str(UserRole.DRIVER),
+            recipient_role=(
+                UserRole.DRIVER.value
+                if hasattr(UserRole.DRIVER, "value")
+                else str(UserRole.DRIVER)
+            ),
             action_url=f"/driver?incident={incident.id}&proof_action=retake",
             metadata_json={
                 "incident_code": inc_code,
@@ -309,7 +330,11 @@ class NotificationService:
                 priority=prio_str,
                 incident_id=incident.id,
                 vehicle_id=incident.assigned_vehicle_id,
-                recipient_role=UserRole.OFFICER.value if hasattr(UserRole.OFFICER, "value") else str(UserRole.OFFICER),
+                recipient_role=(
+                    UserRole.OFFICER.value
+                    if hasattr(UserRole.OFFICER, "value")
+                    else str(UserRole.OFFICER)
+                ),
                 action_url=f"/officer?incident={incident.id}",
                 metadata_json={
                     "incident_code": inc_code,
@@ -332,7 +357,11 @@ class NotificationService:
         inc_code = f"WW-{str(incident.id)[:8].upper()}"
         prio_str = NotificationService._extract_priority_str(incident.priority)
         title = "Collection Proof Submitted"
-        dist_str = f" ({distance_meters:.0f}m from site)" if distance_meters is not None else ""
+        dist_str = (
+            f" ({distance_meters:.0f}m from site)"
+            if distance_meters is not None
+            else ""
+        )
         msg = f"New after-cleaning proof submitted by {driver_name} for {inc_code}{dist_str}. Review required."
 
         for officer_id in officer_ids:
@@ -345,7 +374,11 @@ class NotificationService:
                 priority=prio_str,
                 incident_id=incident.id,
                 vehicle_id=incident.assigned_vehicle_id,
-                recipient_role=UserRole.OFFICER.value if hasattr(UserRole.OFFICER, "value") else str(UserRole.OFFICER),
+                recipient_role=(
+                    UserRole.OFFICER.value
+                    if hasattr(UserRole.OFFICER, "value")
+                    else str(UserRole.OFFICER)
+                ),
                 action_url=f"/officer?incident={incident.id}&tab=verification",
                 metadata_json={
                     "incident_code": inc_code,
@@ -368,7 +401,9 @@ class NotificationService:
         inc_code = f"WW-{str(incident.id)[:8].upper()}"
         prio_str = NotificationService._extract_priority_str(incident.priority)
         title = "Collection Completed"
-        msg = f"Waste collected at {incident.address_text or inc_code} by {driver_name}."
+        msg = (
+            f"Waste collected at {incident.address_text or inc_code} by {driver_name}."
+        )
 
         for officer_id in officer_ids:
             await NotificationService.create_notification(
@@ -380,7 +415,11 @@ class NotificationService:
                 priority=prio_str,
                 incident_id=incident.id,
                 vehicle_id=incident.assigned_vehicle_id,
-                recipient_role=UserRole.OFFICER.value if hasattr(UserRole.OFFICER, "value") else str(UserRole.OFFICER),
+                recipient_role=(
+                    UserRole.OFFICER.value
+                    if hasattr(UserRole.OFFICER, "value")
+                    else str(UserRole.OFFICER)
+                ),
                 action_url=f"/officer?incident={incident.id}",
                 metadata_json={
                     "incident_code": inc_code,

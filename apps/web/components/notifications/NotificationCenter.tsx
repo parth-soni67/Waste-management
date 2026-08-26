@@ -11,7 +11,6 @@ import {
   CheckCircle2,
   XCircle,
   Clock,
-  ExternalLink,
   RefreshCw,
   Sparkles,
 } from "lucide-react";
@@ -31,7 +30,7 @@ export interface NotificationItem {
   action_url?: string;
   is_read: boolean;
   read_at?: string;
-  metadata_json?: Record<string, any>;
+  metadata_json?: Record<string, unknown>;
   created_at: string;
 }
 
@@ -105,13 +104,18 @@ export default function NotificationCenter({
 
   // Initial load and polling fallback every 20s
   useEffect(() => {
-    void fetchNotifications(true);
+    const initialTimer = setTimeout(() => {
+      void fetchNotifications(true);
+    }, 0);
 
     const interval = setInterval(() => {
       void fetchNotifications(false);
     }, 20000);
 
-    return () => clearInterval(interval);
+    return () => {
+      clearTimeout(initialTimer);
+      clearInterval(interval);
+    };
   }, [fetchNotifications]);
 
   // WebSocket Live Listener for Real-Time Updates

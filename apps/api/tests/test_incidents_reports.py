@@ -444,7 +444,9 @@ async def test_clustered_incident_timestamp_and_relative_time_thresholds(
 
 
 @pytest.mark.asyncio
-async def test_officer_approval_updates_citizen_report_status(officer_token, citizen_token):
+async def test_officer_approval_updates_citizen_report_status(
+    officer_token, citizen_token
+):
     """
     Verify that when an officer approves/completes a report via PATCH /api/v1/reports/{report_id},
     the report status in DB updates to COMPLETED and subsequent GETs reflect COMPLETED.
@@ -476,7 +478,10 @@ async def test_officer_approval_updates_citizen_report_status(officer_token, cit
         # 3. Officer approves/completes the report using short REP- ID prefix or raw UUID
         res_patch = await client.patch(
             f"/api/v1/reports/{short_id}",
-            json={"status": "COMPLETED", "officer_notes": "Verified and approved by municipal officer"},
+            json={
+                "status": "COMPLETED",
+                "officer_notes": "Verified and approved by municipal officer",
+            },
             headers={"Authorization": f"Bearer {officer_token}"},
         )
         assert res_patch.status_code == 200
@@ -484,7 +489,9 @@ async def test_officer_approval_updates_citizen_report_status(officer_token, cit
         assert patched_data["status"] == "COMPLETED"
 
         # 4. Fetch list of reports and verify report status is COMPLETED
-        res_list = await client.get("/api/v1/reports", headers={"Authorization": f"Bearer {officer_token}"})
+        res_list = await client.get(
+            "/api/v1/reports", headers={"Authorization": f"Bearer {officer_token}"}
+        )
         assert res_list.status_code == 200
         reports_list = res_list.json()
         matching_report = next((r for r in reports_list if r["id"] == report_id), None)

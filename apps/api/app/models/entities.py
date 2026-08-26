@@ -74,7 +74,6 @@ class IncidentStatus(str, enum.Enum):
     REOPENED = "REOPENED"
 
 
-
 class WasteCategory(str, enum.Enum):
     MIXED = "mixed"
     PLASTIC = "plastic"
@@ -394,9 +393,7 @@ class Notification(Base):
         nullable=True,
         index=True,
     )
-    recipient_role: Mapped[Optional[str]] = mapped_column(
-        String(50), nullable=True
-    )
+    recipient_role: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     action_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     is_read: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     read_at: Mapped[Optional[datetime]] = mapped_column(

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import {
   ShieldAlert,
@@ -33,7 +33,7 @@ export default function AdminPage() {
     { id: "3", time: "3 mins ago", event: "Dynamic route solver (Loop C) heartbeat OK", level: "INFO" },
   ]);
 
-  const fetchAdminMetrics = async () => {
+  const fetchAdminMetrics = useCallback(async () => {
     setIsRefreshing(true);
     try {
       const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/$/, "");
@@ -60,13 +60,16 @@ export default function AdminPage() {
     } finally {
       setIsRefreshing(false);
     }
-  };
+  }, [getAuthHeaders]);
 
   useEffect(() => {
     if (user && user.role === "admin") {
-      void fetchAdminMetrics();
+      const timer = setTimeout(() => {
+        void fetchAdminMetrics();
+      }, 0);
+      return () => clearTimeout(timer);
     }
-  }, [user]);
+  }, [user, fetchAdminMetrics]);
 
   const mounted = React.useSyncExternalStore(
     () => () => {},

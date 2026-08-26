@@ -22,7 +22,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
-
 from app.core.config import settings
 from app.core.db import engine
 from app.core.redis import close_redis, init_redis, redis_pool
@@ -74,7 +73,6 @@ app = FastAPI(
 # Ensure uploads directory exists and mount static file server
 os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=settings.UPLOAD_DIR), name="uploads")
-
 
 
 # ---------------------------------------------------------------------------
@@ -151,8 +149,6 @@ app.include_router(
 app.include_router(
     verification_router, prefix="/api/v1/verification", tags=["verification"]
 )
-app.include_router(
-    notifications_router, prefix="/api/v1", tags=["notifications"]
-)
+app.include_router(notifications_router, prefix="/api/v1", tags=["notifications"])
 app.include_router(agent_router, prefix="/api/v1/agent", tags=["agent"])
 app.include_router(analytics_router, prefix="/api/v1/analytics", tags=["analytics"])

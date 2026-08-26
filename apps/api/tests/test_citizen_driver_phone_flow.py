@@ -8,17 +8,28 @@ Validates:
 4. Officer driver assignment updates and proof completion workflow
 """
 
+from typing import AsyncGenerator
+
 import pytest
 import pytest_asyncio
-from typing import AsyncGenerator
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from app.main import app
 from app.core.db import Base, get_db
 from app.core.security import hash_password
-from app.models.entities import User, UserRole, Incident, Report, IncidentStatus, PriorityLevel, WasteCategory, Vehicle, VehicleStatus
+from app.main import app
+from app.models.entities import (
+    Incident,
+    IncidentStatus,
+    PriorityLevel,
+    Report,
+    User,
+    UserRole,
+    Vehicle,
+    VehicleStatus,
+    WasteCategory,
+)
 from app.schemas.all_schemas import normalize_indian_phone_number
 
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
@@ -66,10 +77,14 @@ def test_phone_normalization():
     with pytest.raises(ValueError, match="Phone number is required."):
         normalize_indian_phone_number("")
 
-    with pytest.raises(ValueError, match="Enter a valid 10-digit Indian mobile number."):
+    with pytest.raises(
+        ValueError, match="Enter a valid 10-digit Indian mobile number."
+    ):
         normalize_indian_phone_number("12345")
 
-    with pytest.raises(ValueError, match="Enter a valid 10-digit Indian mobile number."):
+    with pytest.raises(
+        ValueError, match="Enter a valid 10-digit Indian mobile number."
+    ):
         normalize_indian_phone_number("5876543210")  # invalid first digit
 
 
@@ -80,7 +95,9 @@ def test_phone_normalization():
 
 @pytest.mark.asyncio
 async def test_registration_valid_phone_creates_citizen():
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as ac:
         payload = {
             "email": "newcitizen@example.com",
             "password": "Password123!",
@@ -97,7 +114,9 @@ async def test_registration_valid_phone_creates_citizen():
 
 @pytest.mark.asyncio
 async def test_registration_invalid_phone_rejected():
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as ac:
         payload = {
             "email": "badphone@example.com",
             "password": "Password123!",
@@ -170,14 +189,21 @@ async def test_assigned_driver_sees_citizen_phone():
         session.add(report)
         await session.commit()
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as ac:
         # 1. Driver A Login
-        login_res_a = await ac.post("/api/v1/auth/login", json={"email": "driver_a@example.com", "password": "password123"})
+        login_res_a = await ac.post(
+            "/api/v1/auth/login",
+            json={"email": "driver_a@example.com", "password": "password123"},
+        )
         assert login_res_a.status_code == 200
         token_a = login_res_a.json()["access_token"]
 
         # Driver A gets assignments
-        res_a = await ac.get("/api/v1/driver/assignments", headers={"Authorization": f"Bearer {token_a}"})
+        res_a = await ac.get(
+            "/api/v1/driver/assignments", headers={"Authorization": f"Bearer {token_a}"}
+        )
         assert res_a.status_code == 200
         assignments_a = res_a.json()
         assert len(assignments_a) == 1
@@ -185,12 +211,17 @@ async def test_assigned_driver_sees_citizen_phone():
         assert assignments_a[0]["citizen_phone"] == "+919876512345"
 
         # 2. Driver B Login
-        login_res_b = await ac.post("/api/v1/auth/login", json={"email": "driver_b@example.com", "password": "password123"})
+        login_res_b = await ac.post(
+            "/api/v1/auth/login",
+            json={"email": "driver_b@example.com", "password": "password123"},
+        )
         assert login_res_b.status_code == 200
         token_b = login_res_b.json()["access_token"]
 
         # Driver B gets assignments — should be EMPTY because Driver B is not assigned to this incident!
-        res_b = await ac.get("/api/v1/driver/assignments", headers={"Authorization": f"Bearer {token_b}"})
+        res_b = await ac.get(
+            "/api/v1/driver/assignments", headers={"Authorization": f"Bearer {token_b}"}
+        )
         assert res_b.status_code == 200
         assignments_b = res_b.json()
         assert len(assignments_b) == 0
@@ -218,7 +249,9 @@ async def test_public_reports_do_not_leak_phone():
         session.add(report)
         await session.commit()
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as ac:
         res = await ac.get("/api/v1/reports")
         assert res.status_code == 200
         reports = res.json()
